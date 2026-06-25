@@ -19,12 +19,14 @@ import { createFarm, configFromEnv } from "./farm-core.mjs";
 const PORT = Number(process.env.PORT) || 8080;
 const TOKEN = process.env.CONTROL_TOKEN;
 const ORIGIN = process.env.ALLOW_ORIGIN || "*";
-if (!TOKEN) {
-  console.error("Refusing to start: set CONTROL_TOKEN to a secret value.");
-  process.exit(1);
-}
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
+
+// Stay up even if the token isn't set yet — just reject every request — so the
+// service stays healthy and you can generate a domain, then add the token.
+if (!TOKEN) {
+  log("WARNING: CONTROL_TOKEN is not set. All control requests will be rejected (401) until you add it in your host's variables and redeploy.");
+}
 const farm = createFarm(configFromEnv(), log);
 if (process.env.AUTOSTART === "1") farm.start();
 
@@ -50,8 +52,10 @@ const server = createServer((req, res) => {
   }
 
   const auth = req.headers.authorization || "";
-  if (auth !== `Bearer ${TOKEN}`) {
-    return send(res, 401, { error: "unauthorized" });
+  if (!TOKEN || auth !== `Bearer ${TOKEN}`) {
+    return send(res, 401, {
+      error: TOKEN ? "unauthorized" : "CONTROL_TOKEN not set on the runner",
+    });
   }
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
