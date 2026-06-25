@@ -92,6 +92,18 @@ export function shortPnl(
   return size * (entryPrice - markPrice);
 }
 
+/**
+ * PnL for an existing position given its SIGNED size (negative = short).
+ * Works for both directions: pnl = szi * (price - entry).
+ */
+export function positionPnl(
+  entryPrice: number,
+  price: number,
+  szi: number,
+): number {
+  return szi * (price - entryPrice);
+}
+
 /** PnL as a % of the margin you posted (this is your real ROE). */
 export function shortRoePct(
   inp: ShortInputs,
