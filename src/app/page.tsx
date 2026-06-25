@@ -1,4 +1,5 @@
 import { MarketsDashboard } from "@/components/MarketsDashboard";
+import { ShortRadar } from "@/components/ShortRadar";
 import Link from "next/link";
 
 export default function Home() {
@@ -38,6 +39,8 @@ export default function Home() {
           </Link>
         </div>
       </section>
+
+      <ShortRadar />
 
       <MarketsDashboard />
     </div>
