@@ -4,14 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMarkets } from "@/lib/useMarkets";
 import { useNetwork, NetworkToggle } from "@/lib/network";
-import {
-  useBot,
-  type Strategy,
-  type EquityPoint,
-  type ClosedTrade,
-} from "@/lib/bot";
+import { useBot, type Strategy, type ClosedTrade } from "@/lib/bot";
 import type { Market } from "@/lib/hyperliquid";
 import { fmtUsd, fmtPct } from "@/lib/format";
+import { EquityChart } from "@/components/EquityChart";
+import { FarmView } from "@/components/FarmView";
+import { Tip } from "@/components/Info";
 
 const STRATEGIES: { key: Strategy; label: string; desc: string }[] = [
   {
@@ -43,7 +41,7 @@ const STRAT_LABEL: Record<Strategy, string> = Object.fromEntries(
 export function BotView() {
   const { network } = useNetwork();
   const { markets } = useMarkets(network);
-  const [mode, setMode] = useState<"single" | "compare">("single");
+  const [mode, setMode] = useState<"single" | "compare" | "farm">("single");
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
@@ -65,7 +63,8 @@ export function BotView() {
             {(
               [
                 ["single", "Single bot"],
-                ["compare", "Compare strategies"],
+                ["compare", "Compare"],
+                ["farm", "Funding farm"],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -91,8 +90,10 @@ export function BotView() {
 
       {mode === "single" ? (
         <SingleBot markets={markets} />
-      ) : (
+      ) : mode === "compare" ? (
         <CompareBots markets={markets} />
+      ) : (
+        <FarmView markets={markets} />
       )}
 
       <p className="mt-4 text-center text-[11px] text-muted">
@@ -195,7 +196,13 @@ function SingleBot({ markets }: { markets: Market[] }) {
           </div>
 
           <div className="mb-3">
-            <span className="text-[11px] font-medium text-muted">Fee model</span>
+            <span className="flex items-center gap-1 text-[11px] font-medium text-muted">
+              Fee model
+              <Tip
+                title="Fee model"
+                text="The exchange fee charged on every fill. Maker = passive limit orders (~0.015%, cheaper, but assumes they actually fill). Taker = market orders (~0.045%, instant). You pay it on BOTH the open and the close, so it's the main thing eating a tiny-profit strategy."
+              />
+            </span>
             <div className="mt-1 inline-flex rounded-md border border-border p-0.5 text-xs">
               {(
                 [
@@ -227,8 +234,12 @@ function SingleBot({ markets }: { markets: Market[] }) {
           </div>
 
           <div className="mb-3">
-            <span className="text-[11px] font-medium text-muted">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-muted">
               Coins to scan
+              <Tip
+                title="Coins to scan"
+                text="Which markets the bot looks at for signals. Type specific symbols (comma-separated) to focus it, or leave blank to auto-scan the most liquid markets by volume."
+              />
             </span>
             <input
               disabled={bot.running}
@@ -253,18 +264,21 @@ function SingleBot({ markets }: { markets: Market[] }) {
 
           <Field
             label="Position size (USD)"
+            tip="The dollar size of each simulated short (its notional). Bigger size = bigger $ swings and bigger fees per trade."
             value={bot.config.positionSizeUsd}
             onChange={(v) => bot.setConfig({ ...bot.config, positionSizeUsd: v })}
             disabled={bot.running}
           />
           <Field
             label="Leverage (x)"
+            tip="Multiplier on the position. It mainly sets the simulated liquidation price here (entry × (1 + 1/leverage)). Higher = liquidation closer to entry = a small adverse move wipes the position."
             value={bot.config.leverage}
             onChange={(v) => bot.setConfig({ ...bot.config, leverage: v })}
             disabled={bot.running}
           />
           <Field
             label="Take-profit (net $)"
+            tip="Close the position once its profit AFTER fees and funding reaches this many dollars. e.g. 0.50 = bank it at +$0.50 net. Set it above the fee breakeven shown above or you can't win."
             step={0.05}
             value={bot.config.takeProfitUsd}
             onChange={(v) => bot.setConfig({ ...bot.config, takeProfitUsd: v })}
@@ -272,6 +286,7 @@ function SingleBot({ markets }: { markets: Market[] }) {
           />
           <Field
             label="Stop-loss (% move)"
+            tip="Close at a loss if the price moves this % against the short (i.e. rises this much above entry). Caps the downside so one bad trade doesn't erase many small wins."
             step={0.1}
             value={bot.config.stopLossPct}
             onChange={(v) => bot.setConfig({ ...bot.config, stopLossPct: v })}
@@ -279,12 +294,14 @@ function SingleBot({ markets }: { markets: Market[] }) {
           />
           <Field
             label="Max hold (min)"
+            tip="Force-close a position after this many minutes even if neither the take-profit nor stop has hit — so capital doesn't sit stuck in a position going nowhere."
             value={bot.config.maxHoldMin}
             onChange={(v) => bot.setConfig({ ...bot.config, maxHoldMin: v })}
             disabled={bot.running}
           />
           <Field
             label="Max open positions"
+            tip="How many shorts the bot will hold at the same time. More = more diversified but more total risk and fees."
             value={bot.config.maxConcurrent}
             onChange={(v) => bot.setConfig({ ...bot.config, maxConcurrent: v })}
             disabled={bot.running}
@@ -292,6 +309,7 @@ function SingleBot({ markets }: { markets: Market[] }) {
           {bot.config.strategy === "meanReversion" && (
             <Field
               label="Entry RSI (overbought)"
+              tip="RSI is a 0–100 momentum gauge; above ~70 means 'overbought' (price ran up fast). The bot shorts coins at/above this RSI, betting the pump cools off. Higher = pickier."
               value={bot.config.entryRsi}
               onChange={(v) => bot.setConfig({ ...bot.config, entryRsi: v })}
               disabled={bot.running}
@@ -300,6 +318,7 @@ function SingleBot({ markets }: { markets: Market[] }) {
           {bot.config.strategy === "fundingCarry" && (
             <Field
               label="Min funding (APR %)"
+              tip="Only short coins whose annualized funding rate is at least this high — i.e. where longs are paying shorts well, so you collect funding while holding the short."
               value={bot.config.minFundingApr}
               onChange={(v) => bot.setConfig({ ...bot.config, minFundingApr: v })}
               disabled={bot.running}
@@ -602,56 +621,6 @@ function exportCsv(closed: ClosedTrade[]) {
   URL.revokeObjectURL(url);
 }
 
-function EquityChart({
-  points,
-  start,
-}: {
-  points: EquityPoint[];
-  start: number;
-}) {
-  if (points.length < 2) {
-    return (
-      <div className="flex h-24 items-center justify-center text-xs text-muted">
-        Equity curve appears once the bot has run a little.
-      </div>
-    );
-  }
-  const w = 600;
-  const h = 96;
-  const pad = 4;
-  const es = points.map((p) => p.e);
-  const min = Math.min(...es, start);
-  const max = Math.max(...es, start);
-  const span = max - min || 1;
-  const x = (i: number) => pad + (i / (points.length - 1)) * (w - 2 * pad);
-  const y = (e: number) => pad + (1 - (e - min) / span) * (h - 2 * pad);
-  const path = points
-    .map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.e).toFixed(1)}`)
-    .join(" ");
-  const last = points[points.length - 1].e;
-  const up = last >= start;
-  const startY = y(start);
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none">
-      <line
-        x1={pad}
-        x2={w - pad}
-        y1={startY}
-        y2={startY}
-        stroke="var(--border)"
-        strokeDasharray="4 4"
-      />
-      <path
-        d={path}
-        fill="none"
-        stroke={up ? "var(--long)" : "var(--short)"}
-        strokeWidth={2}
-      />
-    </svg>
-  );
-}
-
 function Stat({
   label,
   value,
@@ -677,12 +646,14 @@ function Stat({
 
 function Field({
   label,
+  tip,
   value,
   onChange,
   step = 1,
   disabled,
 }: {
   label: string;
+  tip?: string;
   value: number;
   onChange: (v: number) => void;
   step?: number;
@@ -690,7 +661,10 @@ function Field({
 }) {
   return (
     <label className="mb-2 block">
-      <span className="text-[11px] text-muted">{label}</span>
+      <span className="flex items-center gap-1 text-[11px] text-muted">
+        {label}
+        {tip && <Tip title={label} text={tip} />}
+      </span>
       <input
         type="number"
         step={step}

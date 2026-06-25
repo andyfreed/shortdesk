@@ -111,6 +111,7 @@ export interface EquityPoint {
 
 interface Persisted {
   config: BotConfig;
+  running: boolean;
   positions: PaperPosition[];
   closed: ClosedTrade[];
   realized: number;
@@ -201,7 +202,10 @@ export function useBot(
     ...(loadPersisted(storageKey).config ?? {}),
     ...(locked ? { strategy: locked } : {}),
   }));
-  const [running, setRunning] = useState(false);
+  // Resume running if it was running last time (survives navigation/reload).
+  const [running, setRunning] = useState(
+    () => loadPersisted(storageKey).running ?? false,
+  );
   const [positions, setPositions] = useState<PaperPosition[]>(
     () => loadPersisted(storageKey).positions ?? [],
   );
@@ -237,15 +241,22 @@ export function useBot(
     realizedRef.current = realized;
   }, [realized]);
 
-  // persist on change
+  // persist on change (to this instance's own key)
   useEffect(() => {
-    const data: Persisted = { config, positions, closed, realized, equityCurve };
+    const data: Persisted = {
+      config,
+      running,
+      positions,
+      closed,
+      realized,
+      equityCurve,
+    };
     try {
-      localStorage.setItem(KEY, JSON.stringify(data));
+      localStorage.setItem(storageKey, JSON.stringify(data));
     } catch {
       /* ignore */
     }
-  }, [config, positions, closed, realized, equityCurve]);
+  }, [storageKey, config, running, positions, closed, realized, equityCurve]);
 
   const addLog = useCallback((text: string) => {
     setLog((l) => [{ t: Date.now(), text }, ...l].slice(0, 100));
