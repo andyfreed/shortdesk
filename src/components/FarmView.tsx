@@ -1,14 +1,18 @@
 "use client";
 
-import { useNetwork } from "@/lib/network";
 import { useFundingFarm } from "@/lib/farm";
-import type { Market } from "@/lib/hyperliquid";
+import type { Market, Network } from "@/lib/hyperliquid";
 import { fmtUsd, fmtPct } from "@/lib/format";
 import { EquityChart } from "@/components/EquityChart";
 import { Tip } from "@/components/Info";
 
-export function FarmView({ markets }: { markets: Market[] }) {
-  const { network } = useNetwork();
+export function FarmView({
+  markets,
+  network,
+}: {
+  markets: Market[];
+  network: Network;
+}) {
   const farm = useFundingFarm(markets, network);
   const c = farm.config;
 

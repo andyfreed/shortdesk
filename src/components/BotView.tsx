@@ -3,9 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMarkets } from "@/lib/useMarkets";
-import { useNetwork, NetworkToggle } from "@/lib/network";
 import { useBot, type Strategy, type ClosedTrade } from "@/lib/bot";
-import type { Market } from "@/lib/hyperliquid";
+import type { Market, Network } from "@/lib/hyperliquid";
+
+// The bot is always paper, so it always reads LIVE MAINNET data (testnet
+// markets are thin with fake funding → useless signals). No network toggle here.
+const BOT_NETWORK: Network = "mainnet";
 import { fmtUsd, fmtPct } from "@/lib/format";
 import { EquityChart } from "@/components/EquityChart";
 import { FarmView } from "@/components/FarmView";
@@ -39,8 +42,7 @@ const STRAT_LABEL: Record<Strategy, string> = Object.fromEntries(
 ) as Record<Strategy, string>;
 
 export function BotView() {
-  const { network } = useNetwork();
-  const { markets } = useMarkets(network);
+  const { markets } = useMarkets(BOT_NETWORK);
   const [mode, setMode] = useState<"single" | "compare" | "farm">("single");
 
   return (
@@ -78,7 +80,12 @@ export function BotView() {
               </button>
             ))}
           </div>
-          <NetworkToggle />
+          <span
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted"
+            title="The paper bot always uses live mainnet market data for realistic signals. There's no real money at stake, so no testnet option."
+          >
+            Live mainnet data
+          </span>
         </div>
       </div>
 
@@ -89,11 +96,11 @@ export function BotView() {
       </div>
 
       {mode === "single" ? (
-        <SingleBot markets={markets} />
+        <SingleBot markets={markets} network={BOT_NETWORK} />
       ) : mode === "compare" ? (
-        <CompareBots markets={markets} />
+        <CompareBots markets={markets} network={BOT_NETWORK} />
       ) : (
-        <FarmView markets={markets} />
+        <FarmView markets={markets} network={BOT_NETWORK} />
       )}
 
       <p className="mt-4 text-center text-[11px] text-muted">
@@ -109,8 +116,13 @@ export function BotView() {
 
 /* ----------------------------- single bot ----------------------------- */
 
-function SingleBot({ markets }: { markets: Market[] }) {
-  const { network } = useNetwork();
+function SingleBot({
+  markets,
+  network,
+}: {
+  markets: Market[];
+  network: Network;
+}) {
   const bot = useBot(markets, network);
 
   const totalTrades = bot.wins + bot.losses;
@@ -456,8 +468,13 @@ function SingleBot({ markets }: { markets: Market[] }) {
 
 /* --------------------------- comparison mode --------------------------- */
 
-function CompareBots({ markets }: { markets: Market[] }) {
-  const { network } = useNetwork();
+function CompareBots({
+  markets,
+  network,
+}: {
+  markets: Market[];
+  network: Network;
+}) {
   // Four independent paper accounts, one per strategy, each with its own store.
   const bots = {
     meanReversion: useBot(markets, network, {
