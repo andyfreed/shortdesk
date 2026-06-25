@@ -15,9 +15,21 @@ const TOPICS = [
   "liquidation",
   "funding",
   "orderType",
+  "timeInForce",
   "size",
+  "notionalHelp",
+  "percentSize",
   "reduceOnly",
+  "closePosition",
+  "takeProfit",
+  "stopLoss",
+  "slippage",
+  "scaleOrder",
+  "twap",
 ] as const;
+
+// Account / onboarding concepts, shown as their own section.
+const ACCOUNT_TOPICS = ["accountModel", "agentKey", "perpsVsSpot"] as const;
 
 export default function LearnPage() {
   return (
@@ -69,6 +81,27 @@ export default function LearnPage() {
             </li>
           ))}
         </ol>
+      </section>
+
+      {/* Account model — the stuff beginners get stuck on */}
+      <section className="mt-10 space-y-8">
+        <h2 className="text-xl font-semibold">
+          Your account: keys, Perps vs Spot
+        </h2>
+        {ACCOUNT_TOPICS.map((k) => {
+          const ex = EXPLAINERS[k];
+          return (
+            <article key={k} id={k} className="scroll-mt-20">
+              <h3 className="text-lg font-semibold">{ex.title}</h3>
+              <p className="mt-1 text-sm font-medium text-accent">{ex.short}</p>
+              <div className="mt-2 space-y-2 text-sm leading-relaxed text-foreground/90">
+                {ex.body.map((p, i) => (
+                  <p key={i}>{p}</p>
+                ))}
+              </div>
+            </article>
+          );
+        })}
       </section>
 
       {/* Concept deep-dives */}

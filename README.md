@@ -8,12 +8,14 @@ An educational trading terminal for understanding how to **short cryptocurrencie
 
 - **Live markets dashboard** — real prices, 24h change, funding rates (annualized) and volume for every Hyperliquid perp, sortable and searchable.
 - **Beginner guide** (`/learn`) — shorting, leverage, cross vs isolated margin, liquidation, funding, order types, fees, risk management, plus a worked example.
-- **Short terminal** (`/trade`) — short-focused order form with:
-  - margin mode (isolated/cross), leverage slider, order type (market/limit), size in USD or coin, slippage tolerance;
-  - a **live calculator**: notional, required margin, **liquidation price + distance**, fees, funding/8h, and a ±5%/±10% PnL scenario grid;
-  - an inline **"?" explainer on every setting** that matches the guide.
+- **Short terminal** (`/trade`) — short-focused order form with the full option set, each with an inline **"?" explainer**:
+  - margin mode (isolated/cross), leverage slider, market/limit order type, **time-in-force** (GTC/IOC/ALO post-only), size in USD/coin or **% of balance**, slippage, **reduce-only**;
+  - attach a **take-profit and stop-loss** on entry (whole-position protection);
+  - a **live calculator**: notional, required margin, **liquidation price + distance**, fees, funding/8h, a ±5%/±10% PnL scenario grid, and a **margin-vs-balance** guard.
+- **Close positions** — full or **partial (25/50/75/100%)** close buttons on each open position (reduce-only buy-back).
 - **Live trading** — connect a wallet and place real shorts. Two safe connection modes (below).
-- **Testnet toggle** — practice with fake money first.
+- **Clear onboarding** — explains agent-key vs account address, Perps vs Spot balances, and empty/funding states (the things beginners trip on).
+- **Testnet toggle** — practice with fake money first (with faucet link).
 
 ## Why this is safe to deploy publicly
 

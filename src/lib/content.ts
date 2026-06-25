@@ -100,6 +100,115 @@ export const EXPLAINERS = {
       "This app sends market shorts as an immediate-or-cancel order priced below the mark by your tolerance, so you never fill at an absurd price during a wick.",
     ],
   },
+  accountModel: {
+    title: "How your Hyperliquid account is split",
+    short:
+      "One account, two buckets: Perps (where shorts get their margin) and Spot. An agent key trades; it can't withdraw.",
+    body: [
+      "Your Hyperliquid account has separate balances. The Perps balance is the collateral that backs perpetual positions like shorts. The Spot balance holds tokens you've bought/deposited. They are not the same pot.",
+      "You can trade with an 'agent' (API) key that signs orders on behalf of your main account but cannot move funds out — so it's safe to paste into an app. Withdrawals always require your real wallet.",
+    ],
+  },
+  agentKey: {
+    title: "Agent (API) key vs account address",
+    short:
+      "The address is your public account ID (42 chars). The agent key is a secret signing key (66 chars) that can trade but not withdraw.",
+    body: [
+      "Your account address is public — it's just the 0x identifier of your wallet (42 characters). It is not a secret.",
+      "An agent/API key is a separate private key (0x + 64 hex = 66 characters) you generate under More → API on Hyperliquid. It can place and cancel orders for your account but cannot withdraw funds, which is exactly why it's the safe thing to give a trading app.",
+      "In the connect form: the first box is your account address; the second box is the agent key. They both start with 0x but the key is about 24 characters longer.",
+    ],
+  },
+  perpsVsSpot: {
+    title: "Perps balance vs Spot balance",
+    short:
+      "Shorting can only use your Perps balance. USDC sitting in Spot must be moved to Perps first.",
+    body: [
+      "Perpetual positions (shorts and longs) draw margin from your Perps balance. If your USDC is in your Spot balance, you can't short with it until you transfer it.",
+      "On Hyperliquid, use the Spot → Perps transfer (clearest on the desktop site). With a Unified account, placing a trade can also draw from your single balance automatically.",
+    ],
+  },
+  notionalHelp: {
+    title: "Notional value",
+    short:
+      "The full dollar size of the position you control. Your margin is a fraction of it (notional ÷ leverage).",
+    body: [
+      "Notional = size × price. It's the total value of what you're shorting, not what you put up. At 5x leverage a $500 notional needs $100 of margin.",
+      "Your profit and loss are calculated on the notional, which is why leverage magnifies returns relative to the margin you posted.",
+    ],
+  },
+  closePosition: {
+    title: "Close position",
+    short:
+      "Buys back the coin you shorted to exit and realize your profit or loss. Partial close takes some risk off while keeping the rest.",
+    body: [
+      "A short is opened by selling; to close it you buy the same amount back. Closing realizes whatever PnL the position currently shows.",
+      "A partial close (e.g. 50%) buys back half, locking in part of the result and leaving the rest of the position open. Closes are reduce-only, so they can never accidentally flip you into a long.",
+    ],
+  },
+  takeProfit: {
+    title: "Take-profit (TP)",
+    short:
+      "An order that auto-closes your short when the price FALLS to your target, locking in gains.",
+    body: [
+      "Because a short profits as price falls, a take-profit triggers below your entry. When the market reaches it, a buy-to-close fires automatically — you don't have to be watching.",
+      "Set it where you'd be happy to bank the trade. It's optional and you can always close manually instead.",
+    ],
+  },
+  stopLoss: {
+    title: "Stop-loss (SL)",
+    short:
+      "An order that auto-closes your short when the price RISES to a level you pick, capping your loss.",
+    body: [
+      "A short loses as price rises, so a stop-loss sits above your entry. If the market hits it, a buy-to-close fires to stop the bleeding before you reach liquidation.",
+      "A stop is your most important risk tool: decide the price that proves your trade wrong, and put the stop there when you open. Note that in fast markets a market-stop can fill slightly worse than its trigger.",
+    ],
+  },
+  tpslGrouping: {
+    title: "Whole-position protection",
+    short:
+      "TP/SL attached here apply to your entire position in this coin, not just this one order.",
+    body: [
+      "These take-profit and stop-loss orders are sent as 'position' TP/SL: they protect your whole short in this market and resize with it, rather than being tied to one specific entry.",
+    ],
+  },
+  timeInForce: {
+    title: "Time-in-force (GTC / IOC / ALO)",
+    short:
+      "How a limit order behaves: GTC rests until filled, IOC fills now or cancels, ALO is maker-only (cheaper fee).",
+    body: [
+      "GTC (Good-til-canceled): the order sits on the book until it fills or you cancel it.",
+      "IOC (Immediate-or-cancel): fills whatever it can right away and cancels the rest — nothing rests.",
+      "ALO (Add-liquidity-only / post-only): rejected if it would fill immediately, guaranteeing you pay the lower maker fee. Useful when you want to be a passive seller.",
+    ],
+  },
+  percentSize: {
+    title: "Size by % of balance",
+    short:
+      "Sizes the trade from your Perps balance instead of a dollar amount. Max uses your full buying power at the current leverage.",
+    body: [
+      "Instead of typing notional, pick a percentage of your available Perps balance. The app multiplies by your leverage to get the position size, so you can size consistently without doing the math.",
+      "Be careful with Max: using 100% of your margin leaves no buffer, so any adverse move pushes you straight toward liquidation. Most traders keep some headroom.",
+    ],
+  },
+  scaleOrder: {
+    title: "Scale order (advanced)",
+    short:
+      "Splits your entry into several limit orders laddered across a price range for a better average fill.",
+    body: [
+      "Rather than one order at a single price, a scale order places multiple limits stepped across a range. If the market swings through your range you get a blended entry instead of all-in at one level.",
+      "This is an advanced tool. You can build it on Hyperliquid's pro interface; ShortDesk keeps the entry simple for learning.",
+    ],
+  },
+  twap: {
+    title: "TWAP order (advanced)",
+    short:
+      "Breaks a large order into small slices executed steadily over minutes to get an average price.",
+    body: [
+      "TWAP (time-weighted average price) drips a big position into the market over time so one large trade doesn't move the price against you. It mostly matters for large size.",
+      "It's available on Hyperliquid directly; for beginner-sized shorts a market or limit order is simpler and fine.",
+    ],
+  },
 } satisfies Record<string, Explainer>;
 
 export type ExplainerKey = keyof typeof EXPLAINERS;
@@ -107,8 +216,8 @@ export type ExplainerKey = keyof typeof EXPLAINERS;
 export const SHORTING_STEPS = [
   {
     n: 1,
-    title: "Fund your account",
-    text: "Deposit USDC to Hyperliquid (on Arbitrum). This collateral is the margin that backs your shorts.",
+    title: "Fund your account (and check Perps, not Spot)",
+    text: "Deposit USDC to Hyperliquid (on Arbitrum). Then make sure it's in your Perps balance — shorting can only use Perps funds. If your money shows under Spot, transfer it Spot → Perps first.",
   },
   {
     n: 2,

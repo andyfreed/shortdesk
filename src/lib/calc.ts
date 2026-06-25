@@ -150,10 +150,17 @@ export interface ShortSummary {
 
 export function summarizeShort(
   inp: ShortInputs,
-  opts: { feeRate?: number; hourlyFundingRate?: number } = {},
+  opts: {
+    feeRate?: number;
+    hourlyFundingRate?: number;
+    /** price assumed for the exit-fee estimate (defaults to entry) */
+    exitPrice?: number;
+  } = {},
 ): ShortSummary {
   const feeRate = opts.feeRate ?? DEFAULT_TAKER_FEE;
   const liqPrice = shortLiquidationPrice(inp);
+  // Exit fee is charged on the notional at the exit price, not entry.
+  const exitPrice = opts.exitPrice ?? inp.entryPrice;
   return {
     notional: notional(inp.entryPrice, inp.size),
     margin: initialMargin(inp.entryPrice, inp.size, inp.leverage),
@@ -161,7 +168,7 @@ export function summarizeShort(
     liqDistancePct: distanceToLiquidationPct(inp.entryPrice, liqPrice),
     mmr: maintenanceMarginFraction(inp.maxLeverage),
     entryFee: fee(inp.entryPrice, inp.size, feeRate),
-    exitFee: fee(inp.entryPrice, inp.size, feeRate),
+    exitFee: fee(exitPrice, inp.size, feeRate),
     funding8h: shortFunding(
       inp.entryPrice,
       inp.size,

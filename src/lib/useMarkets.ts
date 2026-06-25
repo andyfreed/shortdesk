@@ -3,32 +3,57 @@
 import { useEffect, useState, useCallback } from "react";
 import { fetchMarkets, type Market, type Network } from "./hyperliquid";
 
-/** Polls Hyperliquid for live market data every `intervalMs`. */
+/**
+ * Polls Hyperliquid for live market data every `intervalMs`.
+ *
+ * Results are tagged with the network they came from. The returned `markets`
+ * is empty whenever the stored data belongs to a different network than the
+ * one currently selected — so a leftover mainnet BTC can never be tradeable
+ * while testnet data is still loading (asset IDs are per-network indices, so a
+ * stale entry could otherwise route an order to the wrong asset). This is
+ * derived at read time, avoiding a synchronous state-clear inside the effect.
+ */
 export function useMarkets(network: Network, intervalMs = 8000) {
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{ net: Network; markets: Market[] }>({
+    net: network,
+    markets: [],
+  });
+  const [loadedNet, setLoadedNet] = useState<Network | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const m = await fetchMarkets(network);
-      setMarkets(m);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load markets");
-    } finally {
-      setLoading(false);
-    }
+  const refresh = useCallback(async () => {
+    const m = await fetchMarkets(network);
+    setData({ net: network, markets: m });
+    setError(null);
   }, [network]);
 
   useEffect(() => {
-    setLoading(true);
-    load();
-    const id = setInterval(load, intervalMs);
-    return () => clearInterval(id);
-  }, [load, intervalMs]);
+    let active = true;
+    const run = async () => {
+      try {
+        const m = await fetchMarkets(network);
+        if (!active) return;
+        setData({ net: network, markets: m });
+        setLoadedNet(network);
+        setError(null);
+      } catch (e) {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : "Failed to load markets");
+        setLoadedNet(network);
+      }
+    };
+    run();
+    const id = setInterval(run, intervalMs);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [network, intervalMs]);
 
-  return { markets, loading, error, refresh: load };
+  const markets = data.net === network ? data.markets : [];
+  const loading = loadedNet !== network && markets.length === 0;
+
+  return { markets, loading, error, refresh };
 }
 
 export function useMarket(network: Network, name: string, intervalMs = 5000) {

@@ -3,7 +3,6 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useState,
   type ReactNode,
 } from "react";
@@ -22,12 +21,13 @@ const Ctx = createContext<NetworkCtx>({
 const KEY = "shortdesk.network";
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const [network, setNetworkState] = useState<Network>("mainnet");
-
-  useEffect(() => {
-    const saved = localStorage.getItem(KEY);
-    if (saved === "mainnet" || saved === "testnet") setNetworkState(saved);
-  }, []);
+  // Lazy init from localStorage so a saved testnet user doesn't flash the
+  // real-funds mainnet banner (and doesn't double-fetch markets).
+  const [network, setNetworkState] = useState<Network>(() =>
+    typeof window !== "undefined" && localStorage.getItem(KEY) === "testnet"
+      ? "testnet"
+      : "mainnet",
+  );
 
   function setNetwork(n: Network) {
     setNetworkState(n);

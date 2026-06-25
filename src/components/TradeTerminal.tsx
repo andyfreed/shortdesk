@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMarkets } from "@/lib/useMarkets";
+import { useAccountState } from "@/lib/useAccount";
 import { useNetwork, NetworkToggle } from "@/lib/network";
 import { useWallet } from "@/lib/wallet";
 import {
@@ -11,6 +12,7 @@ import {
   setLeverage,
   type Market,
   type OrderType,
+  type Tif,
 } from "@/lib/hyperliquid";
 import {
   summarizeShort,
@@ -35,32 +37,43 @@ type MarginMode = "isolated" | "cross";
 export function TradeTerminal() {
   const params = useSearchParams();
   const { network } = useNetwork();
-  const { markets, loading } = useMarkets(network);
+  const { markets, loading, error, refresh } = useMarkets(network);
   const w = useWallet();
+  const { account, stale, refresh: refreshAccount } = useAccountState(
+    network,
+    w.address,
+  );
 
   const [coin, setCoin] = useState(params.get("coin")?.toUpperCase() ?? "BTC");
   const [marginMode, setMarginMode] = useState<MarginMode>("isolated");
   const [leverage, setLev] = useState(5);
   const [orderType, setOrderType] = useState<OrderType>("market");
+  const [tif, setTif] = useState<Tif>("Gtc");
   const [amountMode, setAmountMode] = useState<AmountMode>("usd");
   const [amount, setAmount] = useState("500");
   const [limitPrice, setLimitPrice] = useState("");
   const [slippage, setSlippage] = useState(5);
+  const [reduceOnly, setReduceOnly] = useState(false);
+  const [takeProfit, setTakeProfit] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
 
   const market = useMemo(
     () => markets.find((m) => m.name === coin),
     [markets, coin],
   );
 
-  // Clamp leverage to the market's max and seed the limit price.
-  useEffect(() => {
-    if (market) {
-      setLev((l) => Math.min(l, market.maxLeverage));
-      setLimitPrice((p) => p || String(market.markPx));
-    }
-  }, [market]);
+  // Seed/reset the limit price to the current coin's mark and clamp leverage to
+  // its max whenever the coin changes (or when its market first loads). This is
+  // React's "adjust state during render" pattern — guarded so it runs once per
+  // coin and never overwrites a price the user has edited.
+  const [seededCoin, setSeededCoin] = useState("");
+  if (market && coin !== seededCoin) {
+    setSeededCoin(coin);
+    setLimitPrice(String(market.markPx));
+    setLev((l) => Math.min(l, market.maxLeverage));
+  }
 
-  if (loading && !market) {
+  if (loading && !market && !error) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-16 text-center text-muted">
         Loading live markets…
@@ -72,11 +85,7 @@ export function TradeTerminal() {
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <MarketPicker
-            markets={markets}
-            coin={coin}
-            onChange={setCoin}
-          />
+          <MarketPicker markets={markets} coin={coin} onChange={setCoin} />
           {market && <MarketHeader market={market} />}
         </div>
         <div className="flex items-center gap-2">
@@ -90,26 +99,53 @@ export function TradeTerminal() {
         </div>
       </div>
 
-      {network === "mainnet" && (
+      {error && (
+        <Banner tone="warn">
+          Couldn’t load live market data ({error}).{" "}
+          <button onClick={refresh} className="underline">
+            Retry
+          </button>
+          .
+        </Banner>
+      )}
+
+      {network === "mainnet" ? (
         <Banner tone="warn">
           You are on <strong>mainnet</strong> — orders use real funds. Switch to{" "}
           <strong>testnet</strong> (top right) to practice with fake money
           first.
         </Banner>
+      ) : (
+        <Banner tone="info">
+          You are on <strong>testnet</strong> — fake money for practice. Get
+          test USDC from the{" "}
+          <a
+            href="https://app.hyperliquid-testnet.xyz/drip"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            testnet faucet
+          </a>
+          , then it appears in your Perps balance here.
+        </Banner>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        {/* LEFT: form */}
         <div className="space-y-4">
           {market ? (
             <ShortForm
               market={market}
+              perpsBalance={account?.accountValue ?? 0}
+              connected={!!w.signer}
               marginMode={marginMode}
               setMarginMode={setMarginMode}
               leverage={leverage}
               setLev={setLev}
               orderType={orderType}
               setOrderType={setOrderType}
+              tif={tif}
+              setTif={setTif}
               amountMode={amountMode}
               setAmountMode={setAmountMode}
               amount={amount}
@@ -118,27 +154,44 @@ export function TradeTerminal() {
               setLimitPrice={setLimitPrice}
               slippage={slippage}
               setSlippage={setSlippage}
+              reduceOnly={reduceOnly}
+              setReduceOnly={setReduceOnly}
+              takeProfit={takeProfit}
+              setTakeProfit={setTakeProfit}
+              stopLoss={stopLoss}
+              setStopLoss={setStopLoss}
             />
-          ) : (
+          ) : !error ? (
             <div className="rounded-xl border border-border bg-surface p-8 text-center text-muted">
               Market “{coin}” not found on {network}.
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* RIGHT: wallet + place */}
         <div className="space-y-4">
-          <WalletPanel />
+          <WalletPanel
+            account={account}
+            stale={stale}
+            markets={markets}
+            onChanged={refreshAccount}
+          />
           {market && (
             <ExecutePanel
               market={market}
+              perpsBalance={account?.accountValue ?? 0}
+              connected={!!w.signer}
               marginMode={marginMode}
               leverage={leverage}
               orderType={orderType}
+              tif={tif}
               amountMode={amountMode}
               amount={amount}
               limitPrice={limitPrice}
               slippage={slippage}
+              reduceOnly={reduceOnly}
+              takeProfit={takeProfit}
+              stopLoss={stopLoss}
+              onPlaced={refreshAccount}
             />
           )}
         </div>
@@ -200,14 +253,18 @@ function MarketHeader({ market }: { market: Market }) {
   );
 }
 
-function ShortForm(props: {
+interface FormProps {
   market: Market;
+  perpsBalance: number;
+  connected: boolean;
   marginMode: MarginMode;
   setMarginMode: (m: MarginMode) => void;
   leverage: number;
   setLev: (n: number) => void;
   orderType: OrderType;
   setOrderType: (o: OrderType) => void;
+  tif: Tif;
+  setTif: (t: Tif) => void;
   amountMode: AmountMode;
   setAmountMode: (m: AmountMode) => void;
   amount: string;
@@ -216,10 +273,45 @@ function ShortForm(props: {
   setLimitPrice: (s: string) => void;
   slippage: number;
   setSlippage: (n: number) => void;
-}) {
+  reduceOnly: boolean;
+  setReduceOnly: (b: boolean) => void;
+  takeProfit: string;
+  setTakeProfit: (s: string) => void;
+  stopLoss: string;
+  setStopLoss: (s: string) => void;
+}
+
+function ShortForm(props: FormProps) {
   const { market } = props;
   const lev = props.leverage;
   const levPct = (lev / market.maxLeverage) * 100;
+  const refPrice =
+    props.orderType === "limit" && Number(props.limitPrice) > 0
+      ? Number(props.limitPrice)
+      : market.markPx;
+
+  // Convert the amount when switching USD <-> coin so the position stays equal.
+  function switchAmountMode(next: AmountMode) {
+    if (next === props.amountMode) return;
+    const val = Number(props.amount);
+    if (Number.isFinite(val) && val > 0 && refPrice > 0) {
+      props.setAmount(
+        next === "coin"
+          ? String(+(val / refPrice).toFixed(6))
+          : String(+(val * refPrice).toFixed(2)),
+      );
+    }
+    props.setAmountMode(next);
+  }
+
+  // %-of-balance buttons size in USD notional from the Perps balance.
+  function setPct(pct: number) {
+    const notional = props.perpsBalance * lev * pct;
+    if (notional > 0) {
+      props.setAmountMode("usd");
+      props.setAmount(String(+notional.toFixed(2)));
+    }
+  }
 
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
@@ -227,7 +319,9 @@ function ShortForm(props: {
         <span className="rounded-md bg-short/15 px-2 py-1 text-sm font-semibold text-short">
           SHORT {market.name}
         </span>
-        <span className="text-xs text-muted">Sell to open · profits if price falls</span>
+        <span className="text-xs text-muted">
+          Sell to open · profits if price falls
+        </span>
       </div>
 
       {/* margin mode */}
@@ -270,9 +364,14 @@ function ShortForm(props: {
         />
         <div className="mt-1 flex justify-between text-[10px] text-muted">
           <span>1x</span>
-          <span>conservative ≤5x</span>
           <span>max {market.maxLeverage}x</span>
         </div>
+        {lev > 5 && (
+          <p className="mt-1 text-[11px] text-warn">
+            Above 5x is high risk for beginners — your liquidation price sits
+            very close to entry.
+          </p>
+        )}
       </div>
 
       {/* order type */}
@@ -303,7 +402,7 @@ function ShortForm(props: {
             {(["usd", "coin"] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => props.setAmountMode(m)}
+                onClick={() => switchAmountMode(m)}
                 className={`rounded px-2 py-0.5 ${
                   props.amountMode === m
                     ? "bg-surface-2 text-foreground"
@@ -324,31 +423,72 @@ function ShortForm(props: {
             placeholder="0.00"
           />
           <span className="text-xs text-muted">
-            {props.amountMode === "usd" ? "USD notional" : market.name}
+            {props.amountMode === "usd" ? "USD (position value)" : market.name}
           </span>
         </div>
+        {props.connected && props.perpsBalance > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="flex items-center gap-1 text-[10px] text-muted">
+              % of balance <Info k="percentSize" />
+            </span>
+            {[0.25, 0.5, 0.75, 1].map((p) => (
+              <button
+                key={p}
+                onClick={() => setPct(p)}
+                className="flex-1 rounded-md border border-border py-1 text-[11px] text-muted hover:border-accent hover:text-accent"
+              >
+                {p === 1 ? "Max" : `${p * 100}%`}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* limit price / slippage */}
+      {/* limit price + TIF / slippage */}
       {props.orderType === "limit" ? (
-        <div className="mb-1">
-          <Label>Limit price</Label>
-          <div className="mt-1.5 flex items-center rounded-lg border border-border bg-background px-3">
-            <input
-              value={props.limitPrice}
-              onChange={(e) => props.setLimitPrice(e.target.value)}
-              inputMode="decimal"
-              className="w-full bg-transparent py-2.5 text-sm outline-none"
-            />
-            <span className="text-xs text-muted">USD</span>
+        <div className="mb-4 space-y-3">
+          <div>
+            <Label>Limit price</Label>
+            <div className="mt-1.5 flex items-center rounded-lg border border-border bg-background px-3">
+              <input
+                value={props.limitPrice}
+                onChange={(e) => props.setLimitPrice(e.target.value)}
+                inputMode="decimal"
+                className="w-full bg-transparent py-2.5 text-sm outline-none"
+              />
+              <span className="text-xs text-muted">USD</span>
+            </div>
+            <p className="mt-1 text-[11px] text-muted">
+              Your short only fills at this price or higher.
+            </p>
           </div>
-          <p className="mt-1 text-[11px] text-muted">
-            Your short only fills at this price or higher. A resting limit order
-            pays the lower maker fee.
-          </p>
+          <div>
+            <Label k="timeInForce">Time-in-force</Label>
+            <div className="mt-1.5 inline-flex rounded-lg border border-border p-0.5 text-xs">
+              {(
+                [
+                  ["Gtc", "GTC (rest)"],
+                  ["Ioc", "IOC (now)"],
+                  ["Alo", "ALO (maker)"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => props.setTif(v)}
+                  className={`rounded-md px-2.5 py-1 ${
+                    props.tif === v
+                      ? "bg-surface-2 text-foreground"
+                      : "text-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="mb-1">
+        <div className="mb-4">
           <Label k="slippage">Slippage tolerance</Label>
           <div className="mt-1.5 flex items-center gap-2">
             {[1, 3, 5, 10].map((s) => (
@@ -367,22 +507,82 @@ function ShortForm(props: {
           </div>
         </div>
       )}
+
+      {/* protect the position: TP / SL */}
+      <div className="mb-4 rounded-lg border border-border bg-background p-3">
+        <div className="flex items-center gap-1 text-xs font-medium text-muted">
+          Protect this position (optional) <Info k="tpslGrouping" />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <Label k="takeProfit">Take-profit ↓</Label>
+            <input
+              value={props.takeProfit}
+              onChange={(e) => props.setTakeProfit(e.target.value)}
+              inputMode="decimal"
+              placeholder="price below entry"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2.5 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <div>
+            <Label k="stopLoss">Stop-loss ↑</Label>
+            <input
+              value={props.stopLoss}
+              onChange={(e) => props.setStopLoss(e.target.value)}
+              inputMode="decimal"
+              placeholder="price above entry"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2.5 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* reduce-only */}
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={props.reduceOnly}
+          onChange={(e) => props.setReduceOnly(e.target.checked)}
+          className="accent-accent"
+        />
+        <span className="flex items-center gap-1">
+          Reduce-only (only shrink/close an existing position){" "}
+          <Info k="reduceOnly" />
+        </span>
+      </label>
+
+      <p className="mt-3 text-[11px] text-muted">
+        Looking for scale or TWAP orders?{" "}
+        <Link href="/learn#scaleOrder" className="text-accent hover:underline">
+          What those are
+        </Link>{" "}
+        — advanced; available on Hyperliquid’s pro interface.
+      </p>
     </div>
   );
 }
 
 /* ------------------------ execute + calculator ------------------------ */
 
-function ExecutePanel(props: {
+interface ExecProps {
   market: Market;
+  perpsBalance: number;
+  connected: boolean;
   marginMode: MarginMode;
   leverage: number;
   orderType: OrderType;
+  tif: Tif;
   amountMode: AmountMode;
   amount: string;
   limitPrice: string;
   slippage: number;
-}) {
+  reduceOnly: boolean;
+  takeProfit: string;
+  stopLoss: string;
+  onPlaced?: () => void;
+}
+
+function ExecutePanel(props: ExecProps) {
   const { market } = props;
   const { network } = useNetwork();
   const w = useWallet();
@@ -392,9 +592,11 @@ function ExecutePanel(props: {
     null,
   );
 
+  const limitOk =
+    props.orderType !== "limit" || Number(props.limitPrice) > 0;
   const entryPrice =
-    props.orderType === "limit" && Number(props.limitPrice) > 0
-      ? Number(props.limitPrice)
+    props.orderType === "limit"
+      ? Number(props.limitPrice) || 0
       : market.markPx;
 
   const amt = Number(props.amount) || 0;
@@ -414,7 +616,6 @@ function ExecutePanel(props: {
     hourlyFundingRate: market.funding,
   });
 
-  // scenario PnL at ±5% / ±10%
   const scenarios = [-10, -5, 5, 10].map((pct) => {
     const px = entryPrice * (1 + pct / 100);
     return {
@@ -425,8 +626,19 @@ function ExecutePanel(props: {
     };
   });
 
-  const valid = size > 0 && entryPrice > 0 && summary.margin > 0;
-  const danger = summary.liqDistancePct < 5; // liquidation within 5%
+  const overBalance =
+    props.connected &&
+    props.perpsBalance > 0 &&
+    summary.margin > props.perpsBalance;
+  const baseValid =
+    size > 0 && entryPrice > 0 && summary.margin > 0 && limitOk;
+  const valid = baseValid && !overBalance;
+  const danger = summary.liqDistancePct < 5;
+
+  const tp = Number(props.takeProfit) || 0;
+  const sl = Number(props.stopLoss) || 0;
+  const tpWarn = tp > 0 && tp >= entryPrice;
+  const slWarn = sl > 0 && sl <= entryPrice;
 
   async function execute() {
     if (!w.signer || !valid) return;
@@ -448,7 +660,10 @@ function ExecutePanel(props: {
         orderType: props.orderType,
         limitPrice: Number(props.limitPrice),
         slippage: props.slippage / 100,
-        reduceOnly: false,
+        tif: props.tif,
+        reduceOnly: props.reduceOnly,
+        takeProfitPrice: tp > 0 ? tp : undefined,
+        stopLossPrice: sl > 0 ? sl : undefined,
       });
       const status = res?.response?.data?.statuses?.[0];
       if (status && typeof status === "object" && "error" in status) {
@@ -461,9 +676,13 @@ function ExecutePanel(props: {
           )}`,
         });
       } else {
-        setMsg({ tone: "ok", text: "Order placed (resting on the book)." });
+        setMsg({
+          tone: "ok",
+          text: "Order placed — resting in the order book until the price reaches your limit.",
+        });
       }
       setConfirming(false);
+      props.onPlaced?.();
     } catch (e) {
       setMsg({
         tone: "err",
@@ -484,12 +703,15 @@ function ExecutePanel(props: {
           label={`Size (${market.name})`}
           value={size > 0 ? sizeToWire(size, market.szDecimals) : "—"}
         />
-        <Row label="Notional" value={fmtUsd(summary.notional)} />
         <Row
-          label="Margin required"
-          value={fmtUsd(summary.margin)}
-          strong
+          label={
+            <span className="flex items-center gap-1">
+              Notional <Info k="notionalHelp" />
+            </span>
+          }
+          value={fmtUsd(summary.notional)}
         />
+        <Row label="Margin required" value={fmtUsd(summary.margin)} strong />
         <Row
           label={
             <span className="flex items-center gap-1">
@@ -511,28 +733,53 @@ function ExecutePanel(props: {
           strong
         />
         <Row
-          label="Est. fee (each side)"
+          label="Est. fee (per side, paid on entry + exit)"
           value={fmtUsd(summary.entryFee)}
         />
         <Row
-          label="Funding / 8h (est.)"
+          label={
+            <span className="flex items-center gap-1">
+              Funding / 8h (est.) <Info k="funding" />
+            </span>
+          }
           value={
-            <span className={summary.funding8h >= 0 ? "text-long" : "text-short"}>
+            <span
+              className={summary.funding8h >= 0 ? "text-long" : "text-short"}
+            >
               {summary.funding8h >= 0 ? "+" : ""}
               {fmtUsd(summary.funding8h)}
             </span>
           }
         />
       </dl>
+      <p className="mt-1 text-[10px] text-muted">
+        Funding: <span className="text-long">green</span> = you receive it as a
+        short; <span className="text-short">red</span> = you pay it. Charged
+        hourly.
+      </p>
 
-      {valid && danger && (
+      {overBalance && (
+        <div className="mt-3 rounded-lg border border-short/40 bg-short/10 px-3 py-2 text-xs text-short">
+          Margin required ({fmtUsd(summary.margin)}) exceeds your Perps balance
+          ({fmtUsd(props.perpsBalance)}). Lower the size/leverage or add USDC to
+          Perps.
+        </div>
+      )}
+
+      {valid && danger && !overBalance && (
         <div className="mt-3 rounded-lg border border-short/40 bg-short/10 px-3 py-2 text-xs text-short">
           ⚠ Liquidation is only {fmtPct(summary.liqDistancePct)} away. A small
           move against you wipes out this position. Consider lower leverage.
         </div>
       )}
 
-      {/* scenarios */}
+      {(tpWarn || slWarn) && (
+        <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] text-warn">
+          {tpWarn && "Take-profit should be BELOW entry for a short (you profit as price falls). "}
+          {slWarn && "Stop-loss should be ABOVE entry for a short (you lose as price rises)."}
+        </div>
+      )}
+
       {valid && (
         <div className="mt-3">
           <div className="mb-1 text-xs text-muted">If price moves…</div>
@@ -565,7 +812,6 @@ function ExecutePanel(props: {
         </div>
       )}
 
-      {/* action */}
       <div className="mt-4">
         {!w.signer ? (
           <div className="rounded-lg bg-surface-2 px-3 py-2 text-center text-xs text-muted">
@@ -587,8 +833,10 @@ function ExecutePanel(props: {
                 {sizeToWire(size, market.szDecimals)} {market.name}
               </strong>{" "}
               at {props.leverage}x {props.marginMode}, margin{" "}
-              <strong>{fmtUsd(summary.margin)}</strong>, liq{" "}
+              <strong>{fmtUsd(summary.margin)}</strong>, liquidation{" "}
               <strong>{fmtUsd(summary.liqPrice)}</strong>.
+              {tp > 0 && <> TP {fmtUsd(tp)}.</>}
+              {sl > 0 && <> SL {fmtUsd(sl)}.</>}
               {network === "mainnet" && " This uses REAL funds."}
             </div>
             <div className="flex gap-2">
@@ -646,7 +894,7 @@ function Banner({
   tone,
   children,
 }: {
-  tone: "warn";
+  tone: "warn" | "info";
   children: React.ReactNode;
 }) {
   return (
@@ -654,7 +902,7 @@ function Banner({
       className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
         tone === "warn"
           ? "border-warn/40 bg-warn/10 text-warn"
-          : "border-border"
+          : "border-accent/40 bg-accent/10 text-foreground"
       }`}
     >
       {children}

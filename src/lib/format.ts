@@ -19,6 +19,15 @@ export function roundSize(size: number, szDecimals: number): number {
   return Math.round(size * factor) / factor;
 }
 
+/**
+ * Floor a size to the lot step. Used when sizing from a margin budget so the
+ * required initial margin can never exceed the budget (rounding up could).
+ */
+export function floorSize(size: number, szDecimals: number): number {
+  const factor = 10 ** szDecimals;
+  return Math.floor(size * factor) / factor;
+}
+
 /** Round a price to a value Hyperliquid will accept for a perp asset. */
 export function roundPrice(price: number, szDecimals: number): number {
   if (!Number.isFinite(price) || price <= 0) return price;
@@ -26,13 +35,15 @@ export function roundPrice(price: number, szDecimals: number): number {
   // Integer prices are always allowed regardless of sig figs.
   if (Number.isInteger(price)) return price;
 
-  const maxDecimals = PERP_MAX_DECIMALS - szDecimals;
+  const maxDecimals = Math.max(0, PERP_MAX_DECIMALS - szDecimals);
 
   // 5 significant figures.
   const sigRounded = Number(price.toPrecision(MAX_SIG_FIGS));
   // Then clamp decimal places.
   const factor = 10 ** maxDecimals;
-  return Math.round(sigRounded * factor) / factor;
+  const rounded = Math.round(sigRounded * factor) / factor;
+  // Never let a positive price round down to zero (would be rejected).
+  return rounded > 0 ? rounded : sigRounded;
 }
 
 /** A price string suitable for sending to the API (no trailing zeros, valid). */
@@ -41,7 +52,9 @@ export function priceToWire(price: number, szDecimals: number): string {
 }
 
 export function sizeToWire(size: number, szDecimals: number): string {
-  return roundSize(size, szDecimals).toFixed(szDecimals);
+  // Canonical wire format: rounded to lot step, no trailing zeros (matches the
+  // official SDKs). priceToWire already normalizes prices the same way.
+  return stripTrailingZeros(roundSize(size, szDecimals));
 }
 
 function stripTrailingZeros(n: number): string {

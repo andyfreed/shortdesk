@@ -1,127 +1,55 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWallet } from "@/lib/wallet";
 import { useNetwork } from "@/lib/network";
-import { fetchAccount, type AccountSummary } from "@/lib/hyperliquid";
+import { closeShort, type AccountSummary, type Market } from "@/lib/hyperliquid";
 import { fmtUsd, fmtNum } from "@/lib/format";
+import { Info } from "@/components/Info";
 
-export function WalletPanel() {
+export function WalletPanel({
+  account,
+  stale,
+  markets,
+  onChanged,
+}: {
+  account: AccountSummary | null;
+  stale?: boolean;
+  markets: Market[];
+  onChanged?: () => void;
+}) {
   const w = useWallet();
-  const { network } = useNetwork();
   const [tab, setTab] = useState<"agent" | "browser">("agent");
   const [key, setKey] = useState("");
-  const [master, setMaster] = useState("");
+  // Pre-fill the address from the value saved last time (lint-clean, no effect).
+  const [master, setMaster] = useState(() =>
+    typeof window !== "undefined"
+      ? localStorage.getItem("shortdesk.master") ?? ""
+      : "",
+  );
   const [remember, setRemember] = useState(true);
-  const [account, setAccount] = useState<AccountSummary | null>(null);
-
-  // Pre-fill the address field with whatever was saved last time.
-  useEffect(() => {
-    if (w.address) setMaster((m) => m || w.address!);
-  }, [w.address]);
-
-  // Pull live account state when connected (or when an address is remembered).
-  useEffect(() => {
-    if (!w.address) {
-      setAccount(null);
-      return;
-    }
-    let active = true;
-    const load = () =>
-      fetchAccount(network, w.address!)
-        .then((a) => active && setAccount(a))
-        .catch(() => active && setAccount(null));
-    load();
-    const id = setInterval(load, 6000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [w.address, network]);
+  const [swapWarn, setSwapWarn] = useState(false);
 
   if (w.signer) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-muted">
-              Connected · {w.mode === "agent" ? "Agent key" : "Browser wallet"}
-            </div>
-            <div className="tabular text-sm">
-              {w.address?.slice(0, 6)}…{w.address?.slice(-4)}
-            </div>
-          </div>
-          <button
-            onClick={w.disconnect}
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted hover:text-foreground"
-          >
-            Disconnect
-          </button>
-        </div>
-        {account && (
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <Stat
-              label="Perps (tradeable)"
-              value={fmtUsd(account.accountValue)}
-            />
-            <Stat label="Spot" value={fmtUsd(account.spotUsdc)} />
-          </div>
-        )}
-        {account &&
-          account.accountValue < 0.01 &&
-          account.spotUsdc >= 0.01 && (
-            <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-              You have {fmtUsd(account.spotUsdc)} in <strong>Spot</strong> but{" "}
-              <strong>$0 in Perps</strong>. Shorting uses your Perps balance —
-              transfer USDC from Spot → Perps on{" "}
-              <a
-                href="https://app.hyperliquid.xyz"
-                target="_blank"
-                rel="noreferrer"
-                className="underline"
-              >
-                app.hyperliquid.xyz
-              </a>{" "}
-              and it’ll appear here within seconds.
-            </div>
-          )}
-        {account && account.positions.length > 0 && (
-          <div className="mt-3">
-            <div className="mb-1 text-xs text-muted">Open positions</div>
-            <div className="space-y-1">
-              {account.positions.map((p) => (
-                <div
-                  key={p.coin}
-                  className="flex items-center justify-between rounded-md bg-surface-2 px-2.5 py-1.5 text-xs"
-                >
-                  <span className="font-medium">
-                    {p.coin}{" "}
-                    <span className={p.szi < 0 ? "text-short" : "text-long"}>
-                      {p.szi < 0 ? "SHORT" : "LONG"}
-                    </span>
-                  </span>
-                  <span className="tabular text-muted">
-                    {fmtNum(Math.abs(p.szi))} @ {fmtUsd(p.entryPx)}
-                  </span>
-                  <span
-                    className={`tabular ${
-                      p.unrealizedPnl >= 0 ? "text-long" : "text-short"
-                    }`}
-                  >
-                    {fmtUsd(p.unrealizedPnl)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      <ConnectedView
+        account={account}
+        stale={stale}
+        markets={markets}
+        onChanged={onChanged}
+      />
     );
   }
 
+  const keyLen = key.trim().replace(/^0x/, "").length;
+  const masterLen = master.trim().replace(/^0x/, "").length;
+
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <h3 className="text-sm font-semibold">Connect to trade live</h3>
+      <div className="flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold">Connect to trade live</h3>
+        <Info k="agentKey" />
+      </div>
       <p className="mt-1 text-xs text-muted">
         Keys stay in your browser and are sent only to Hyperliquid. We never see
         them.
@@ -142,25 +70,69 @@ export function WalletPanel() {
       </div>
 
       {tab === "agent" ? (
-        <div className="mt-3 space-y-2">
-          <p className="rounded-md bg-surface-2 p-2 text-xs text-muted">
-            Recommended. In Hyperliquid: <strong>More → API</strong> → generate
-            a wallet. Agent keys can trade but <strong>cannot withdraw</strong>.
-            Sent only to Hyperliquid, never to our servers.
-          </p>
-          <input
-            value={master}
-            onChange={(e) => setMaster(e.target.value)}
-            placeholder="Main account address (0x… you deposited to)"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <input
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            type="password"
-            placeholder="Agent private key (0x…)"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
-          />
+        <div className="mt-3 space-y-3">
+          <ol className="space-y-0.5 rounded-md bg-surface-2 p-2 text-xs text-muted">
+            <li>1. On Hyperliquid open <strong>More → API</strong>.</li>
+            <li>2. Click <strong>Generate</strong> to create an API/agent wallet.</li>
+            <li>
+              3. Copy the <strong>private key</strong> it shows (a long 0x
+              string) and authorize it.
+            </li>
+            <li>4. Paste both values below. The agent key can trade but{" "}
+              <strong>cannot withdraw</strong>.</li>
+          </ol>
+
+          <div>
+            <label className="text-xs font-medium">
+              Step 1 — Your main account address
+            </label>
+            <input
+              value={master}
+              onChange={(e) => setMaster(e.target.value)}
+              placeholder="0x… (the account you deposited USDC into)"
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <p className="mt-0.5 text-[11px] text-muted">
+              Public address, 42 characters. Not a secret.{" "}
+              {master && (
+                <span className={masterLen === 40 ? "text-long" : "text-warn"}>
+                  ({master.trim().length} chars)
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium">
+              Step 2 — Agent (API) private key
+            </label>
+            <input
+              value={key}
+              onChange={(e) => {
+                setKey(e.target.value);
+                setSwapWarn(false);
+              }}
+              onBlur={() => setSwapWarn(keyLen === 40)}
+              type="password"
+              placeholder="0x… (the secret key from More → API)"
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <p className="mt-0.5 text-[11px] text-muted">
+              Secret signing key, 66 characters.{" "}
+              {key && (
+                <span className={keyLen === 64 ? "text-long" : "text-warn"}>
+                  ({key.trim().length} chars)
+                </span>
+              )}
+            </p>
+            {swapWarn && (
+              <p className="mt-1 text-[11px] text-warn">
+                That looks like an address, not a private key — did you swap the
+                two fields?
+              </p>
+            )}
+          </div>
+
           <label className="flex cursor-pointer items-start gap-2 text-xs text-muted">
             <input
               type="checkbox"
@@ -202,6 +174,215 @@ export function WalletPanel() {
           {w.error}
         </div>
       )}
+    </div>
+  );
+}
+
+function ConnectedView({
+  account,
+  stale,
+  markets,
+  onChanged,
+}: {
+  account: AccountSummary | null;
+  stale?: boolean;
+  markets: Market[];
+  onChanged?: () => void;
+}) {
+  const w = useWallet();
+  const { network } = useNetwork();
+  const empty =
+    account != null &&
+    account.accountValue < 0.01 &&
+    account.spotUsdc < 0.01;
+  const stuckInSpot =
+    account != null &&
+    account.accountValue < 0.01 &&
+    account.spotUsdc >= 0.01;
+
+  return (
+    <div className="rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs text-muted">
+            {w.mode === "agent" ? "Main account · via agent key" : "Browser wallet"}
+          </div>
+          <div className="tabular text-sm">
+            {w.address?.slice(0, 6)}…{w.address?.slice(-4)}
+          </div>
+        </div>
+        <button
+          onClick={w.disconnect}
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-muted hover:text-foreground"
+        >
+          Disconnect
+        </button>
+      </div>
+
+      {account && (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <Stat
+              label="Perps — for shorting"
+              value={fmtUsd(account.accountValue)}
+            />
+            <Stat
+              label="Spot — not tradeable"
+              value={fmtUsd(account.spotUsdc)}
+            />
+          </div>
+          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted">
+            Shorting draws margin from your Perps balance only <Info k="perpsVsSpot" />
+            {stale && <span className="text-warn">· may be out of date</span>}
+          </p>
+        </>
+      )}
+
+      {empty && (
+        <div className="mt-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
+          This account has no USDC yet.{" "}
+          {network === "testnet" ? (
+            <>
+              On testnet, get fake test USDC from the{" "}
+              <a
+                href="https://app.hyperliquid-testnet.xyz/drip"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                testnet faucet
+              </a>{" "}
+              to practice.
+            </>
+          ) : (
+            <>
+              Deposit USDC to Hyperliquid (Arbitrum) at{" "}
+              <a
+                href="https://app.hyperliquid.xyz"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                app.hyperliquid.xyz
+              </a>{" "}
+              to fund your Perps balance before shorting.
+            </>
+          )}
+        </div>
+      )}
+
+      {stuckInSpot && (
+        <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          You have {fmtUsd(account!.spotUsdc)} in <strong>Spot</strong> but{" "}
+          <strong>$0 in Perps</strong>. Transfer USDC from Spot → Perps on{" "}
+          <a
+            href="https://app.hyperliquid.xyz"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            app.hyperliquid.xyz
+          </a>{" "}
+          and it’ll appear here within seconds.
+        </div>
+      )}
+
+      {account && account.positions.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 flex items-center gap-1 text-xs text-muted">
+            Open positions <Info k="closePosition" />
+          </div>
+          <div className="space-y-2">
+            {account.positions.map((p) => (
+              <PositionRow
+                key={p.coin}
+                coin={p.coin}
+                szi={p.szi}
+                entryPx={p.entryPx}
+                pnl={p.unrealizedPnl}
+                market={markets.find((m) => m.name === p.coin)}
+                onChanged={onChanged}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PositionRow({
+  coin,
+  szi,
+  entryPx,
+  pnl,
+  market,
+  onChanged,
+}: {
+  coin: string;
+  szi: number;
+  entryPx: number | null;
+  pnl: number;
+  market?: Market;
+  onChanged?: () => void;
+}) {
+  const w = useWallet();
+  const { network } = useNetwork();
+  const [busy, setBusy] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const isShort = szi < 0;
+
+  async function doClose(fraction: number) {
+    if (!w.signer || !market) {
+      setErr("Live market data still loading — try again in a second.");
+      return;
+    }
+    setBusy(fraction);
+    setErr(null);
+    try {
+      const size = Math.abs(szi) * fraction;
+      await closeShort({ network, wallet: w.signer, market, size });
+      onChanged?.();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Close failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="rounded-md bg-surface-2 px-2.5 py-2 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="font-medium">
+          {coin}{" "}
+          <span className={isShort ? "text-short" : "text-long"}>
+            {isShort ? "SHORT" : "LONG"}
+          </span>
+        </span>
+        <span className="tabular text-muted">
+          {fmtNum(Math.abs(szi))} @ {fmtUsd(entryPx)}
+        </span>
+        <span className={`tabular ${pnl >= 0 ? "text-long" : "text-short"}`}>
+          {pnl >= 0 ? "+" : ""}
+          {fmtUsd(pnl)}
+        </span>
+      </div>
+      {isShort && (
+        <div className="mt-2 flex items-center gap-1">
+          <span className="mr-1 text-[10px] text-muted">Close:</span>
+          {[0.25, 0.5, 0.75, 1].map((f) => (
+            <button
+              key={f}
+              disabled={busy !== null}
+              onClick={() => doClose(f)}
+              className="flex-1 rounded border border-border py-1 text-[11px] hover:border-accent hover:text-accent disabled:opacity-50"
+            >
+              {busy === f ? "…" : f === 1 ? "100%" : `${f * 100}%`}
+            </button>
+          ))}
+        </div>
+      )}
+      {err && <div className="mt-1 text-[11px] text-short">{err}</div>}
     </div>
   );
 }

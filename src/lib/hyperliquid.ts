@@ -12,7 +12,7 @@ import {
   ExchangeClient,
 } from "@nktkas/hyperliquid";
 import type { Account, WalletClient } from "viem";
-import { roundSize, priceToWire, sizeToWire } from "./format";
+import { floorSize, priceToWire, sizeToWire } from "./format";
 
 /** Either a viem local account (agent key) or a browser wallet client. */
 export type HlSigner = Account | WalletClient;
@@ -172,6 +172,8 @@ export async function fetchAccount(
 // ---- Trading actions ----
 
 export type OrderType = "market" | "limit";
+/** Time-in-force for limit orders. */
+export type Tif = "Gtc" | "Ioc" | "Alo";
 
 export interface PlaceShortParams {
   network: Network;
@@ -184,7 +186,13 @@ export interface PlaceShortParams {
   limitPrice?: number;
   /** for market orders, how much slippage to allow (e.g. 0.05 = 5%) */
   slippage?: number;
+  /** time-in-force for limit orders (ignored for market, which is always IOC) */
+  tif?: Tif;
   reduceOnly?: boolean;
+  /** attach a take-profit: buy-to-close trigger when price FALLS to this */
+  takeProfitPrice?: number;
+  /** attach a stop-loss: buy-to-close trigger when price RISES to this */
+  stopLossPrice?: number;
 }
 
 /**
@@ -199,48 +207,139 @@ export async function setLeverage(args: {
   isCross: boolean;
 }) {
   const ex = exchangeClient(args.network, args.wallet);
+  // Clamp to the asset's max so Hyperliquid never rejects the action.
+  const leverage = Math.min(
+    args.market.maxLeverage,
+    Math.max(1, Math.floor(args.leverage)),
+  );
   return ex.updateLeverage({
     asset: args.market.assetId,
     isCross: args.isCross,
-    leverage: Math.max(1, Math.floor(args.leverage)),
+    leverage,
   });
 }
+
+type WireOrder = {
+  a: number;
+  b: boolean;
+  p: string;
+  s: string;
+  r: boolean;
+  t:
+    | { limit: { tif: Tif } }
+    | { trigger: { isMarket: boolean; triggerPx: string; tpsl: "tp" | "sl" } };
+};
 
 /**
  * Place a SHORT order (selling to open). For a market order we send an IOC
  * order at a price worse than mark by `slippage` so it crosses the book and
  * fills immediately, mirroring how the Hyperliquid frontend does "market".
+ *
+ * Optional take-profit / stop-loss are attached as reduce-only BUY trigger
+ * orders in the same request (grouping = positionTpsl so they protect the
+ * whole position).
  */
 export async function placeShort(p: PlaceShortParams) {
   const ex = exchangeClient(p.network, p.wallet);
-  const sz = roundSize(p.size, p.market.szDecimals);
+  const { szDecimals, markPx, assetId } = p.market;
+  const sz = floorSize(p.size, szDecimals);
   if (sz <= 0) throw new Error("Size rounds to zero for this market.");
+  const sizeStr = sizeToWire(sz, szDecimals);
 
   let priceStr: string;
-  let tif: "Gtc" | "Ioc" | "Alo";
+  let tif: Tif;
 
   if (p.orderType === "market") {
     const slip = p.slippage ?? 0.05;
     // selling, so we accept a LOWER price; push below mark to guarantee a cross
-    const aggressive = p.market.markPx * (1 - slip);
-    priceStr = priceToWire(aggressive, p.market.szDecimals);
+    priceStr = priceToWire(markPx * (1 - slip), szDecimals);
     tif = "Ioc";
   } else {
     if (!p.limitPrice || p.limitPrice <= 0)
       throw new Error("Limit price required for a limit order.");
-    priceStr = priceToWire(p.limitPrice, p.market.szDecimals);
-    tif = "Gtc";
+    priceStr = priceToWire(p.limitPrice, szDecimals);
+    tif = p.tif ?? "Gtc";
   }
 
+  const orders: WireOrder[] = [
+    {
+      a: assetId,
+      b: false, // false = short / sell
+      p: priceStr,
+      s: sizeStr,
+      r: p.reduceOnly ?? false,
+      t: { limit: { tif } },
+    },
+  ];
+
+  // TP / SL close a short by BUYING back, so they are reduce-only buys.
+  if (p.takeProfitPrice && p.takeProfitPrice > 0) {
+    orders.push({
+      a: assetId,
+      b: true,
+      p: priceToWire(p.takeProfitPrice, szDecimals),
+      s: sizeStr,
+      r: true,
+      t: {
+        trigger: {
+          isMarket: true,
+          triggerPx: priceToWire(p.takeProfitPrice, szDecimals),
+          tpsl: "tp",
+        },
+      },
+    });
+  }
+  if (p.stopLossPrice && p.stopLossPrice > 0) {
+    orders.push({
+      a: assetId,
+      b: true,
+      p: priceToWire(p.stopLossPrice, szDecimals),
+      s: sizeStr,
+      r: true,
+      t: {
+        trigger: {
+          isMarket: true,
+          triggerPx: priceToWire(p.stopLossPrice, szDecimals),
+          tpsl: "sl",
+        },
+      },
+    });
+  }
+
+  const hasTpSl = orders.length > 1;
+  return ex.order({
+    orders,
+    grouping: hasTpSl ? "positionTpsl" : "na",
+  });
+}
+
+/**
+ * Close (or partially close) a SHORT by buying back. Reduce-only so it can
+ * only shrink the position, never flip it long. Uses an aggressive IOC price
+ * ABOVE mark (a buy must accept a higher price — the inverse of opening).
+ */
+export async function closeShort(args: {
+  network: Network;
+  wallet: HlSigner;
+  market: Market;
+  /** size in base units to buy back (already the amount to close) */
+  size: number;
+  slippage?: number;
+}) {
+  const ex = exchangeClient(args.network, args.wallet);
+  const { szDecimals, markPx, assetId } = args.market;
+  const sz = floorSize(args.size, szDecimals);
+  if (sz <= 0) throw new Error("Nothing to close for this market.");
+  const slip = args.slippage ?? 0.05;
   return ex.order({
     orders: [
       {
-        a: p.market.assetId,
-        b: false, // false = short / sell
-        p: priceStr,
-        s: sizeToWire(sz, p.market.szDecimals),
-        r: p.reduceOnly ?? false,
-        t: { limit: { tif } },
+        a: assetId,
+        b: true, // buy to close a short
+        p: priceToWire(markPx * (1 + slip), szDecimals),
+        s: sizeToWire(sz, szDecimals),
+        r: true, // reduce-only
+        t: { limit: { tif: "Ioc" } },
       },
     ],
     grouping: "na",
