@@ -119,6 +119,8 @@ export interface AccountSummary {
   accountValue: number;
   totalMarginUsed: number;
   withdrawable: number;
+  /** USDC sitting in the Spot wallet — must be moved to Perps to short with. */
+  spotUsdc: number;
   positions: OpenPosition[];
 }
 
@@ -138,11 +140,18 @@ export async function fetchAccount(
   address: `0x${string}`,
 ): Promise<AccountSummary> {
   const info = infoClient(network);
-  const s = await info.clearinghouseState({ user: address });
+  const [s, spot] = await Promise.all([
+    info.clearinghouseState({ user: address }),
+    info
+      .spotClearinghouseState({ user: address })
+      .catch(() => ({ balances: [] as { coin: string; total: string }[] })),
+  ]);
+  const usdc = spot.balances.find((b) => b.coin === "USDC");
   return {
     accountValue: num(s.marginSummary.accountValue),
     totalMarginUsed: num(s.marginSummary.totalMarginUsed),
     withdrawable: num(s.withdrawable),
+    spotUsdc: usdc ? num(usdc.total) : 0,
     positions: s.assetPositions.map((p) => {
       const pos = p.position;
       return {

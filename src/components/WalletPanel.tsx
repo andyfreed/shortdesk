@@ -60,10 +60,31 @@ export function WalletPanel() {
         </div>
         {account && (
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <Stat label="Account value" value={fmtUsd(account.accountValue)} />
-            <Stat label="Withdrawable" value={fmtUsd(account.withdrawable)} />
+            <Stat
+              label="Perps (tradeable)"
+              value={fmtUsd(account.accountValue)}
+            />
+            <Stat label="Spot" value={fmtUsd(account.spotUsdc)} />
           </div>
         )}
+        {account &&
+          account.accountValue < 0.01 &&
+          account.spotUsdc >= 0.01 && (
+            <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+              You have {fmtUsd(account.spotUsdc)} in <strong>Spot</strong> but{" "}
+              <strong>$0 in Perps</strong>. Shorting uses your Perps balance —
+              transfer USDC from Spot → Perps on{" "}
+              <a
+                href="https://app.hyperliquid.xyz"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                app.hyperliquid.xyz
+              </a>{" "}
+              and it’ll appear here within seconds.
+            </div>
+          )}
         {account && account.positions.length > 0 && (
           <div className="mt-3">
             <div className="mb-1 text-xs text-muted">Open positions</div>
