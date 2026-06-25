@@ -195,10 +195,10 @@ function ConnectedView({
     account != null &&
     account.accountValue < 0.01 &&
     account.spotUsdc < 0.01;
-  const stuckInSpot =
-    account != null &&
-    account.accountValue < 0.01 &&
-    account.spotUsdc >= 0.01;
+  // Buying power on a unified account = free Perps margin + Spot USDC.
+  const buyingPower = account
+    ? account.withdrawable + account.spotUsdc
+    : 0;
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
@@ -221,19 +221,22 @@ function ConnectedView({
 
       {account && (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <Stat
-              label="Perps — for shorting"
-              value={fmtUsd(account.accountValue)}
-            />
-            <Stat
-              label="Spot — not tradeable"
-              value={fmtUsd(account.spotUsdc)}
-            />
+          <div className="mt-3 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2">
+            <div className="flex items-center gap-1 text-[11px] text-muted">
+              Buying power <Info k="perpsVsSpot" />
+              {stale && <span className="text-warn">· may be out of date</span>}
+            </div>
+            <div className="tabular text-lg font-semibold">
+              {fmtUsd(buyingPower)}
+            </div>
           </div>
-          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted">
-            Shorting draws margin from your Perps balance only <Info k="perpsVsSpot" />
-            {stale && <span className="text-warn">· may be out of date</span>}
+          <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+            <Stat label="Perps (in positions)" value={fmtUsd(account.accountValue)} />
+            <Stat label="Spot USDC" value={fmtUsd(account.spotUsdc)} />
+          </div>
+          <p className="mt-1 text-[11px] text-muted">
+            On a unified account (Hyperliquid’s default) your Spot USDC margins
+            shorts directly — both balances count toward buying power.
           </p>
         </>
       )}
@@ -265,25 +268,9 @@ function ConnectedView({
               >
                 app.hyperliquid.xyz
               </a>{" "}
-              to fund your Perps balance before shorting.
+              before shorting.
             </>
           )}
-        </div>
-      )}
-
-      {stuckInSpot && (
-        <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-          You have {fmtUsd(account!.spotUsdc)} in <strong>Spot</strong> but{" "}
-          <strong>$0 in Perps</strong>. Transfer USDC from Spot → Perps on{" "}
-          <a
-            href="https://app.hyperliquid.xyz"
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            app.hyperliquid.xyz
-          </a>{" "}
-          and it’ll appear here within seconds.
         </div>
       )}
 

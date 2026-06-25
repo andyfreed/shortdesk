@@ -120,12 +120,13 @@ export const EXPLAINERS = {
     ],
   },
   perpsVsSpot: {
-    title: "Perps balance vs Spot balance",
+    title: "Perps balance, Spot balance & buying power",
     short:
-      "Shorting can only use your Perps balance. USDC sitting in Spot must be moved to Perps first.",
+      "Your buying power is free Perps margin + Spot USDC. On a unified account (Hyperliquid's default) Spot USDC margins shorts directly.",
     body: [
-      "Perpetual positions (shorts and longs) draw margin from your Perps balance. If your USDC is in your Spot balance, you can't short with it until you transfer it.",
-      "On Hyperliquid, use the Spot → Perps transfer (clearest on the desktop site). With a Unified account, placing a trade can also draw from your single balance automatically.",
+      "Hyperliquid's default 'unified' account lets your USDC back both spot holdings and perpetual positions. So when you open a short, the margin can come straight from your USDC even if the Perps balance reads $0 — the funds get allocated as the position opens.",
+      "That's why this app counts your Spot USDC as part of your buying power. The Perps tile shows margin already committed to perp positions; the Spot tile shows USDC not yet allocated.",
+      "The exception is a 'Manual' account type, where Perps and Spot are separate and you must transfer Spot → Perps before shorting. If an order is ever rejected for insufficient margin, that's the likely cause.",
     ],
   },
   notionalHelp: {

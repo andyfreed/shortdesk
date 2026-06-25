@@ -136,7 +136,7 @@ export function TradeTerminal() {
           {market ? (
             <ShortForm
               market={market}
-              perpsBalance={account?.accountValue ?? 0}
+              buyingPower={account ? account.withdrawable + account.spotUsdc : 0}
               connected={!!w.signer}
               marginMode={marginMode}
               setMarginMode={setMarginMode}
@@ -178,7 +178,7 @@ export function TradeTerminal() {
           {market && (
             <ExecutePanel
               market={market}
-              perpsBalance={account?.accountValue ?? 0}
+              buyingPower={account ? account.withdrawable + account.spotUsdc : 0}
               connected={!!w.signer}
               marginMode={marginMode}
               leverage={leverage}
@@ -255,7 +255,7 @@ function MarketHeader({ market }: { market: Market }) {
 
 interface FormProps {
   market: Market;
-  perpsBalance: number;
+  buyingPower: number;
   connected: boolean;
   marginMode: MarginMode;
   setMarginMode: (m: MarginMode) => void;
@@ -306,7 +306,7 @@ function ShortForm(props: FormProps) {
 
   // %-of-balance buttons size in USD notional from the Perps balance.
   function setPct(pct: number) {
-    const notional = props.perpsBalance * lev * pct;
+    const notional = props.buyingPower * lev * pct;
     if (notional > 0) {
       props.setAmountMode("usd");
       props.setAmount(String(+notional.toFixed(2)));
@@ -426,7 +426,7 @@ function ShortForm(props: FormProps) {
             {props.amountMode === "usd" ? "USD (position value)" : market.name}
           </span>
         </div>
-        {props.connected && props.perpsBalance > 0 && (
+        {props.connected && props.buyingPower > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5">
             <span className="flex items-center gap-1 text-[10px] text-muted">
               % of balance <Info k="percentSize" />
@@ -564,9 +564,17 @@ function ShortForm(props: FormProps) {
 
 /* ------------------------ execute + calculator ------------------------ */
 
+/** Append a Spot→Perps tip to margin-related rejections (Manual accounts). */
+function marginHint(text: string): string {
+  return /margin|insufficient|collateral/i.test(text)
+    ? `${text} — if your account type is Manual (not unified), transfer USDC from Spot → Perps on app.hyperliquid.xyz first.`
+    : text;
+}
+
+
 interface ExecProps {
   market: Market;
-  perpsBalance: number;
+  buyingPower: number;
   connected: boolean;
   marginMode: MarginMode;
   leverage: number;
@@ -628,8 +636,8 @@ function ExecutePanel(props: ExecProps) {
 
   const overBalance =
     props.connected &&
-    props.perpsBalance > 0 &&
-    summary.margin > props.perpsBalance;
+    props.buyingPower > 0 &&
+    summary.margin > props.buyingPower;
   const baseValid =
     size > 0 && entryPrice > 0 && summary.margin > 0 && limitOk;
   const valid = baseValid && !overBalance;
@@ -667,7 +675,7 @@ function ExecutePanel(props: ExecProps) {
       });
       const status = res?.response?.data?.statuses?.[0];
       if (status && typeof status === "object" && "error" in status) {
-        setMsg({ tone: "err", text: String(status.error) });
+        setMsg({ tone: "err", text: marginHint(String(status.error)) });
       } else if (status && typeof status === "object" && "filled" in status) {
         setMsg({
           tone: "ok",
@@ -686,7 +694,7 @@ function ExecutePanel(props: ExecProps) {
     } catch (e) {
       setMsg({
         tone: "err",
-        text: e instanceof Error ? e.message : "Order failed",
+        text: marginHint(e instanceof Error ? e.message : "Order failed"),
       });
     } finally {
       setBusy(false);
@@ -760,9 +768,8 @@ function ExecutePanel(props: ExecProps) {
 
       {overBalance && (
         <div className="mt-3 rounded-lg border border-short/40 bg-short/10 px-3 py-2 text-xs text-short">
-          Margin required ({fmtUsd(summary.margin)}) exceeds your Perps balance
-          ({fmtUsd(props.perpsBalance)}). Lower the size/leverage or add USDC to
-          Perps.
+          Margin required ({fmtUsd(summary.margin)}) exceeds your buying power
+          ({fmtUsd(props.buyingPower)}). Lower the size/leverage or add USDC.
         </div>
       )}
 
