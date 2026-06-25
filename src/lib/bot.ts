@@ -11,16 +11,29 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { infoClient, type Market, type Network } from "./hyperliquid";
-import { DEFAULT_TAKER_FEE } from "./calc";
+import { DEFAULT_TAKER_FEE, DEFAULT_MAKER_FEE } from "./calc";
+
+export type Strategy = "meanReversion" | "momentum" | "fundingCarry";
+export type FeeModel = "taker" | "maker";
+
+export function feeRateFor(model: FeeModel): number {
+  return model === "maker" ? DEFAULT_MAKER_FEE : DEFAULT_TAKER_FEE;
+}
 
 export interface BotConfig {
+  /** which signal decides what to short */
+  strategy: Strategy;
+  /** taker (market, ~0.045%) or maker (limit, ~0.015%) fees */
+  feeModel: FeeModel;
+  /** specific coins to scan; empty = auto (top by volume) */
+  coins: string[];
   /** simulated starting balance (paper dollars) */
   startBalance: number;
   /** notional USD per simulated short */
   positionSizeUsd: number;
   /** assumed leverage (drives the simulated liquidation price) */
   leverage: number;
-  /** take profit target in NET dollars (after fees) */
+  /** take profit target in NET dollars (after fees + funding) */
   takeProfitUsd: number;
   /** stop loss as a % adverse move in price */
   stopLossPct: number;
@@ -28,13 +41,18 @@ export interface BotConfig {
   maxHoldMin: number;
   /** max simultaneous open positions */
   maxConcurrent: number;
-  /** RSI(14) on 5m at/above this = overbought → short candidate */
+  /** mean-reversion: RSI(14) 5m at/above this = overbought → short */
   entryRsi: number;
-  /** how many top-volume markets to scan */
+  /** funding-carry: only short if annualized funding ≥ this % */
+  minFundingApr: number;
+  /** how many top-volume markets to scan (when coins is empty) */
   scanCount: number;
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
+  strategy: "meanReversion",
+  feeModel: "maker",
+  coins: [],
   startBalance: 1000,
   positionSizeUsd: 100,
   leverage: 3,
@@ -43,6 +61,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   maxHoldMin: 30,
   maxConcurrent: 3,
   entryRsi: 70,
+  minFundingApr: 10,
   scanCount: 15,
 };
 
@@ -55,7 +74,7 @@ export interface PaperPosition {
   leverage: number;
   liqPrice: number;
   openedAt: number;
-  rsi: number;
+  signal: string; // why it was opened, e.g. "RSI 72" / "-1.8%/1h" / "fund 45% APR"
   fundingRate: number; // per-hour, from signal time
 }
 
@@ -81,11 +100,17 @@ export interface LogLine {
   text: string;
 }
 
+export interface EquityPoint {
+  t: number;
+  e: number;
+}
+
 interface Persisted {
   config: BotConfig;
   positions: PaperPosition[];
   closed: ClosedTrade[];
   realized: number;
+  equityCurve: EquityPoint[];
 }
 
 const KEY = "shortdesk.bot";
@@ -119,6 +144,15 @@ export function rsi(closes: number[], period = 14): number | null {
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
+}
+
+/** % return over the last `bars` candles (e.g. 12 × 5m ≈ last hour). */
+export function recentReturnPct(closes: number[], bars = 12): number | null {
+  if (closes.length < bars + 1) return null;
+  const a = closes[closes.length - 1 - bars];
+  const b = closes[closes.length - 1];
+  if (!a) return null;
+  return ((b - a) / a) * 100;
 }
 
 async function fetchCloses(
@@ -157,6 +191,9 @@ export function useBot(markets: Market[], network: Network) {
     () => loadPersisted().closed ?? [],
   );
   const [realized, setRealized] = useState(() => loadPersisted().realized ?? 0);
+  const [equityCurve, setEquityCurve] = useState<EquityPoint[]>(
+    () => loadPersisted().equityCurve ?? [],
+  );
   const [log, setLog] = useState<LogLine[]>([]);
   const [scanning, setScanning] = useState(false);
   const [unrealized, setUnrealized] = useState(0);
@@ -165,6 +202,7 @@ export function useBot(markets: Market[], network: Network) {
   const positionsRef = useRef<PaperPosition[]>(positions);
   const configRef = useRef(config);
   const marketsRef = useRef(markets);
+  const realizedRef = useRef(realized);
   const lastScan = useRef(0);
   useEffect(() => {
     positionsRef.current = positions;
@@ -175,16 +213,19 @@ export function useBot(markets: Market[], network: Network) {
   useEffect(() => {
     marketsRef.current = markets;
   }, [markets]);
+  useEffect(() => {
+    realizedRef.current = realized;
+  }, [realized]);
 
   // persist on change
   useEffect(() => {
-    const data: Persisted = { config, positions, closed, realized };
+    const data: Persisted = { config, positions, closed, realized, equityCurve };
     try {
       localStorage.setItem(KEY, JSON.stringify(data));
     } catch {
       /* ignore */
     }
-  }, [config, positions, closed, realized]);
+  }, [config, positions, closed, realized, equityCurve]);
 
   const addLog = useCallback((text: string) => {
     setLog((l) => [{ t: Date.now(), text }, ...l].slice(0, 100));
@@ -193,8 +234,9 @@ export function useBot(markets: Market[], network: Network) {
   const closePosition = useCallback(
     (pos: PaperPosition, exitPrice: number, reason: CloseReason) => {
       const grossPnl = pos.sizeCoin * (pos.entryPrice - exitPrice);
+      const feeRate = feeRateFor(configRef.current.feeModel);
       const fees =
-        pos.sizeUsd * DEFAULT_TAKER_FEE + exitPrice * pos.sizeCoin * DEFAULT_TAKER_FEE;
+        pos.sizeUsd * feeRate + exitPrice * pos.sizeCoin * feeRate;
       const hours = (Date.now() - pos.openedAt) / 3_600_000;
       // short receives funding when rate positive
       const funding = pos.sizeUsd * pos.fundingRate * hours;
@@ -239,6 +281,7 @@ export function useBot(markets: Market[], network: Network) {
     setPositions([]);
     setClosed([]);
     setRealized(0);
+    setEquityCurve([]);
     setLog([]);
     setUnrealized(0);
   }, []);
@@ -261,13 +304,18 @@ export function useBot(markets: Market[], network: Network) {
       }
       if (!active) return;
 
+      const feeRate = feeRateFor(cfg.feeModel);
       let unreal = 0;
       for (const p of positionsRef.current) {
         const px = Number(mids[p.coin]);
         if (!Number.isFinite(px)) continue;
         const gross = p.sizeCoin * (p.entryPrice - px);
-        const roundTripFees = p.sizeUsd * DEFAULT_TAKER_FEE * 2;
-        const net = gross - roundTripFees;
+        // Round-trip fees: entry on entry notional + exit on current notional.
+        const roundTripFees = (p.sizeUsd + px * p.sizeCoin) * feeRate;
+        const hours = (Date.now() - p.openedAt) / 3_600_000;
+        const funding = p.sizeUsd * p.fundingRate * hours;
+        // NET of fees + funding — so a "take-profit" is never eaten by fees.
+        const net = gross - roundTripFees + funding;
         unreal += gross;
         const ageMin = (Date.now() - p.openedAt) / 60000;
         if (px >= p.liqPrice) closePosition(p, p.liqPrice, "liquidated");
@@ -278,6 +326,10 @@ export function useBot(markets: Market[], network: Network) {
       }
       setUnrealized(unreal);
 
+      // record an equity-curve point each tick
+      const eq = cfg.startBalance + realizedRef.current + unreal;
+      setEquityCurve((c) => [...c, { t: Date.now(), e: eq }].slice(-300));
+
       // 2) scan for new shorts on the slower cadence
       if (
         Date.now() - lastScan.current >= SCAN_MS &&
@@ -287,18 +339,37 @@ export function useBot(markets: Market[], network: Network) {
         setScanning(true);
         try {
           const held = new Set(positionsRef.current.map((p) => p.coin));
+          const wanted = cfg.coins.map((c) => c.toUpperCase());
           const universe = [...marketsRef.current]
             .filter((m) => !held.has(m.name))
+            .filter((m) => (wanted.length ? wanted.includes(m.name) : true))
             .sort((a, b) => b.dayVolumeUsd - a.dayVolumeUsd)
-            .slice(0, cfg.scanCount);
+            .slice(0, wanted.length ? wanted.length : cfg.scanCount);
 
-          let best: { m: Market; rsiVal: number } | null = null;
+          // score candidates per the selected strategy
+          let best: { m: Market; score: number; signal: string } | null = null;
+          const consider = (m: Market, score: number, signal: string) => {
+            if (!best || score > best.score) best = { m, score, signal };
+          };
+
           for (const m of universe) {
             try {
-              const closes = await fetchCloses(network, m.name);
-              const r = rsi(closes);
-              if (r != null && r >= cfg.entryRsi && (!best || r > best.rsiVal)) {
-                best = { m, rsiVal: r };
+              if (cfg.strategy === "fundingCarry") {
+                const apr = m.funding * 24 * 365 * 100;
+                if (apr >= cfg.minFundingApr)
+                  consider(m, apr, `fund ${apr.toFixed(0)}% APR`);
+              } else {
+                const closes = await fetchCloses(network, m.name);
+                if (cfg.strategy === "meanReversion") {
+                  const r = rsi(closes);
+                  if (r != null && r >= cfg.entryRsi)
+                    consider(m, r, `RSI ${r.toFixed(0)}`);
+                } else {
+                  // momentum: short coins already falling over the last hour
+                  const ret = recentReturnPct(closes, 12);
+                  if (ret != null && ret <= -0.5)
+                    consider(m, -ret, `${ret.toFixed(1)}%/1h`);
+                }
               }
             } catch {
               /* skip this coin */
@@ -307,10 +378,9 @@ export function useBot(markets: Market[], network: Network) {
           }
 
           if (best && positionsRef.current.length < cfg.maxConcurrent) {
-            const m = best.m;
+            const { m, signal } = best as { m: Market; signal: string };
             const px = Number(mids[m.name]) || m.markPx;
             const sizeCoin = cfg.positionSizeUsd / px;
-            // simple isolated short liq estimate: entry*(1 + 1/leverage)
             const liqPrice = px * (1 + 1 / cfg.leverage);
             const pos: PaperPosition = {
               id: uid(),
@@ -321,13 +391,11 @@ export function useBot(markets: Market[], network: Network) {
               leverage: cfg.leverage,
               liqPrice,
               openedAt: Date.now(),
-              rsi: best.rsiVal,
+              signal,
               fundingRate: m.funding,
             };
             setPositions((ps) => [...ps, pos]);
-            addLog(
-              `Opened SHORT ${m.name} @ ${px.toFixed(4)} (RSI ${best.rsiVal.toFixed(0)} overbought)`,
-            );
+            addLog(`Opened SHORT ${m.name} @ ${px.toFixed(4)} (${signal})`);
           }
         } finally {
           if (active) setScanning(false);
@@ -348,6 +416,9 @@ export function useBot(markets: Market[], network: Network) {
   const losses = closed.filter((c) => c.net <= 0).length;
   const totalFees = closed.reduce((s, c) => s + c.fees, 0);
   const equity = config.startBalance + realized + unrealized;
+  const feeRate = feeRateFor(config.feeModel);
+  // gross move (per position notional) needed just to cover round-trip fees
+  const breakevenUsd = config.positionSizeUsd * feeRate * 2;
 
   return {
     config,
@@ -356,6 +427,7 @@ export function useBot(markets: Market[], network: Network) {
     setRunning,
     positions,
     closed,
+    equityCurve,
     log,
     scanning,
     realized,
@@ -364,6 +436,8 @@ export function useBot(markets: Market[], network: Network) {
     wins,
     losses,
     totalFees,
+    feeRate,
+    breakevenUsd,
     closeAll,
     reset,
   };

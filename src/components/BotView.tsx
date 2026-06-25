@@ -2,9 +2,67 @@
 
 import { useMarkets } from "@/lib/useMarkets";
 import { useNetwork, NetworkToggle } from "@/lib/network";
-import { useBot } from "@/lib/bot";
+import { useBot, type Strategy, type EquityPoint, type ClosedTrade } from "@/lib/bot";
 import { fmtUsd, fmtPct } from "@/lib/format";
 import Link from "next/link";
+
+const STRATEGIES: { key: Strategy; label: string; desc: string }[] = [
+  {
+    key: "meanReversion",
+    label: "Mean reversion",
+    desc: "Short the most overbought coin (high RSI), betting an over-extended pump snaps back down.",
+  },
+  {
+    key: "momentum",
+    label: "Momentum (downtrend)",
+    desc: "Short coins already falling over the last hour, betting the down-move continues.",
+  },
+  {
+    key: "fundingCarry",
+    label: "Funding carry",
+    desc: "Short coins paying high positive funding — you collect funding each hour just for holding the short.",
+  },
+];
+
+/** Download the closed-trade log as a CSV file. */
+function exportCsv(closed: ClosedTrade[]) {
+  const headers = [
+    "coin",
+    "entry",
+    "exit",
+    "sizeUsd",
+    "grossPnl",
+    "fees",
+    "funding",
+    "net",
+    "reason",
+    "openedAt",
+    "closedAt",
+  ];
+  const rows = closed.map((c) =>
+    [
+      c.coin,
+      c.entryPrice,
+      c.exitPrice,
+      c.sizeUsd,
+      c.grossPnl.toFixed(4),
+      c.fees.toFixed(4),
+      c.funding.toFixed(4),
+      c.net.toFixed(4),
+      c.reason,
+      new Date(c.openedAt).toISOString(),
+      new Date(c.closedAt).toISOString(),
+    ].join(","),
+  );
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `shortdesk-bot-trades.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function BotView() {
   const { network } = useNetwork();
@@ -81,14 +139,105 @@ export function BotView() {
         />
       </div>
 
+      {/* equity curve */}
+      <div className="mt-3 rounded-xl border border-border bg-surface p-4">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Equity curve</h3>
+          <span className="text-[11px] text-muted">
+            dashed line = starting {fmtUsd(bot.config.startBalance)}
+          </span>
+        </div>
+        <EquityChart points={bot.equityCurve} start={bot.config.startBalance} />
+      </div>
+
       <div className="mt-4 grid gap-4 lg:grid-cols-[260px_1fr]">
         {/* config */}
         <div className="rounded-xl border border-border bg-surface p-4">
           <h3 className="mb-2 text-sm font-semibold">Strategy settings</h3>
-          <p className="mb-3 text-[11px] text-muted">
-            Shorts the most overbought liquid market (RSI 5m ≥ threshold), then
-            closes at the take-profit, stop, or timeout — whichever hits first.
-          </p>
+
+          {/* strategy picker */}
+          <div className="mb-3">
+            <span className="text-[11px] font-medium text-muted">Strategy</span>
+            <div className="mt-1 flex flex-col gap-1">
+              {STRATEGIES.map((s) => (
+                <button
+                  key={s.key}
+                  disabled={bot.running}
+                  onClick={() => bot.setConfig({ ...bot.config, strategy: s.key })}
+                  className={`rounded-md border px-2 py-1.5 text-left text-xs disabled:opacity-50 ${
+                    bot.config.strategy === s.key
+                      ? "border-accent text-foreground"
+                      : "border-border text-muted"
+                  }`}
+                >
+                  <span className="font-medium">{s.label}</span>
+                  <span className="block text-[10px] text-muted">{s.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* fee model */}
+          <div className="mb-3">
+            <span className="text-[11px] font-medium text-muted">
+              Fee model
+            </span>
+            <div className="mt-1 inline-flex rounded-md border border-border p-0.5 text-xs">
+              {(
+                [
+                  ["maker", "Maker ~0.015%"],
+                  ["taker", "Taker ~0.045%"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  disabled={bot.running}
+                  onClick={() => bot.setConfig({ ...bot.config, feeModel: v })}
+                  className={`rounded px-2 py-1 disabled:opacity-50 ${
+                    bot.config.feeModel === v
+                      ? "bg-surface-2 text-foreground"
+                      : "text-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-muted">
+              Maker = passive limit orders (cheaper, but assume they fill).
+              Taker = market orders (instant, pricier). Round-trip breakeven on
+              a {fmtUsd(bot.config.positionSizeUsd)} trade:{" "}
+              <span className="text-warn">{fmtUsd(bot.breakevenUsd)}</span> — your
+              take-profit must clear this.
+            </p>
+          </div>
+
+          {/* coin picker */}
+          <div className="mb-3">
+            <span className="text-[11px] font-medium text-muted">
+              Coins to scan
+            </span>
+            <input
+              disabled={bot.running}
+              value={bot.config.coins.join(", ")}
+              onChange={(e) =>
+                bot.setConfig({
+                  ...bot.config,
+                  coins: e.target.value
+                    .split(",")
+                    .map((c) => c.trim().toUpperCase())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="blank = auto (top liquid)"
+              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-50"
+            />
+            <p className="mt-1 text-[10px] text-muted">
+              Comma-separated symbols (e.g. BTC, ETH, SOL). Leave blank to auto-scan
+              the top {bot.config.scanCount} markets by volume.
+            </p>
+          </div>
+
           <Field
             label="Position size (USD)"
             value={bot.config.positionSizeUsd}
@@ -179,7 +328,7 @@ export function BotView() {
                   >
                     <span className="font-medium text-short">{p.coin}</span>
                     <span className="tabular text-muted">
-                      entry {fmtUsd(p.entryPrice)} · RSI {p.rsi.toFixed(0)}
+                      entry {fmtUsd(p.entryPrice)} · {p.signal}
                     </span>
                     <span className="tabular text-muted">
                       liq {fmtUsd(p.liqPrice)}
@@ -192,9 +341,19 @@ export function BotView() {
 
           {/* closed trades */}
           <div className="rounded-xl border border-border bg-surface p-4">
-            <h3 className="mb-2 text-sm font-semibold">
-              Trade history ({bot.closed.length})
-            </h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">
+                Trade history ({bot.closed.length})
+              </h3>
+              {bot.closed.length > 0 && (
+                <button
+                  onClick={() => exportCsv(bot.closed)}
+                  className="rounded-md border border-border px-2 py-1 text-[11px] text-muted hover:text-foreground"
+                >
+                  Export CSV
+                </button>
+              )}
+            </div>
             {bot.closed.length === 0 ? (
               <p className="py-3 text-center text-xs text-muted">No trades yet.</p>
             ) : (
@@ -267,6 +426,55 @@ export function BotView() {
         on testnet first.
       </p>
     </div>
+  );
+}
+
+function EquityChart({
+  points,
+  start,
+}: {
+  points: EquityPoint[];
+  start: number;
+}) {
+  if (points.length < 2) {
+    return (
+      <div className="flex h-24 items-center justify-center text-xs text-muted">
+        Equity curve appears once the bot has run a little.
+      </div>
+    );
+  }
+  const w = 600;
+  const h = 96;
+  const pad = 4;
+  const es = points.map((p) => p.e);
+  const min = Math.min(...es, start);
+  const max = Math.max(...es, start);
+  const span = max - min || 1;
+  const x = (i: number) => pad + (i / (points.length - 1)) * (w - 2 * pad);
+  const y = (e: number) => pad + (1 - (e - min) / span) * (h - 2 * pad);
+  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.e).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1].e;
+  const up = last >= start;
+  const startY = y(start);
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none">
+      {/* start-balance baseline */}
+      <line
+        x1={pad}
+        x2={w - pad}
+        y1={startY}
+        y2={startY}
+        stroke="var(--border)"
+        strokeDasharray="4 4"
+      />
+      <path
+        d={path}
+        fill="none"
+        stroke={up ? "var(--long)" : "var(--short)"}
+        strokeWidth={2}
+      />
+    </svg>
   );
 }
 
