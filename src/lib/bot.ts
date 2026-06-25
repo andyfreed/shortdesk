@@ -13,7 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { infoClient, type Market, type Network } from "./hyperliquid";
 import { DEFAULT_TAKER_FEE, DEFAULT_MAKER_FEE } from "./calc";
 
-export type Strategy = "meanReversion" | "momentum" | "fundingCarry";
+export type Strategy =
+  | "meanReversion"
+  | "momentum"
+  | "fundingCarry"
+  | "experiment";
 export type FeeModel = "taker" | "maker";
 
 export function feeRateFor(model: FeeModel): number {
@@ -117,10 +121,10 @@ const KEY = "shortdesk.bot";
 const CHECK_MS = 5000;
 const SCAN_MS = 45000;
 
-function loadPersisted(): Partial<Persisted> {
+function loadPersisted(key: string): Partial<Persisted> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as Persisted) : {};
   } catch {
     return {};
@@ -177,22 +181,38 @@ function uid(): string {
 
 // ---- the hook ----
 
-export function useBot(markets: Market[], network: Network) {
+export interface BotOptions {
+  /** localStorage key (use distinct keys to run independent paper accounts) */
+  storageKey?: string;
+  /** force a strategy and hide the picker (for the 3-way comparison) */
+  lockedStrategy?: Strategy;
+}
+
+export function useBot(
+  markets: Market[],
+  network: Network,
+  opts: BotOptions = {},
+) {
+  const storageKey = opts.storageKey ?? KEY;
+  const locked = opts.lockedStrategy;
   // Load any persisted paper state once, via lazy initializers (no effect).
   const [config, setConfig] = useState<BotConfig>(() => ({
     ...DEFAULT_BOT_CONFIG,
-    ...(loadPersisted().config ?? {}),
+    ...(loadPersisted(storageKey).config ?? {}),
+    ...(locked ? { strategy: locked } : {}),
   }));
   const [running, setRunning] = useState(false);
   const [positions, setPositions] = useState<PaperPosition[]>(
-    () => loadPersisted().positions ?? [],
+    () => loadPersisted(storageKey).positions ?? [],
   );
   const [closed, setClosed] = useState<ClosedTrade[]>(
-    () => loadPersisted().closed ?? [],
+    () => loadPersisted(storageKey).closed ?? [],
   );
-  const [realized, setRealized] = useState(() => loadPersisted().realized ?? 0);
+  const [realized, setRealized] = useState(
+    () => loadPersisted(storageKey).realized ?? 0,
+  );
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>(
-    () => loadPersisted().equityCurve ?? [],
+    () => loadPersisted(storageKey).equityCurve ?? [],
   );
   const [log, setLog] = useState<LogLine[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -352,6 +372,18 @@ export function useBot(markets: Market[], network: Network) {
             if (!best || score > best.score) best = { m, score, signal };
           };
 
+          // Experiment ("relative-strength fade") needs a market benchmark:
+          // short the alt that has run furthest AHEAD of BTC over the last hour,
+          // betting the excess relative move mean-reverts. Fetch BTC once.
+          let btcRet = 0;
+          if (cfg.strategy === "experiment") {
+            try {
+              btcRet = recentReturnPct(await fetchCloses(network, "BTC"), 12) ?? 0;
+            } catch {
+              /* benchmark unavailable; treat as 0 */
+            }
+          }
+
           for (const m of universe) {
             try {
               if (cfg.strategy === "fundingCarry") {
@@ -364,11 +396,18 @@ export function useBot(markets: Market[], network: Network) {
                   const r = rsi(closes);
                   if (r != null && r >= cfg.entryRsi)
                     consider(m, r, `RSI ${r.toFixed(0)}`);
-                } else {
+                } else if (cfg.strategy === "momentum") {
                   // momentum: short coins already falling over the last hour
                   const ret = recentReturnPct(closes, 12);
                   if (ret != null && ret <= -0.5)
                     consider(m, -ret, `${ret.toFixed(1)}%/1h`);
+                } else {
+                  // experiment: short the biggest relative outperformer vs BTC
+                  const ret = recentReturnPct(closes, 12);
+                  if (ret != null && ret > 0) {
+                    const rel = ret - btcRet;
+                    if (rel >= 2) consider(m, rel, `+${rel.toFixed(1)}% vs BTC`);
+                  }
                 }
               }
             } catch {

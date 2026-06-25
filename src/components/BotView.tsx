@@ -1,10 +1,17 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import { useMarkets } from "@/lib/useMarkets";
 import { useNetwork, NetworkToggle } from "@/lib/network";
-import { useBot, type Strategy, type EquityPoint, type ClosedTrade } from "@/lib/bot";
+import {
+  useBot,
+  type Strategy,
+  type EquityPoint,
+  type ClosedTrade,
+} from "@/lib/bot";
+import type { Market } from "@/lib/hyperliquid";
 import { fmtUsd, fmtPct } from "@/lib/format";
-import Link from "next/link";
 
 const STRATEGIES: { key: Strategy; label: string; desc: string }[] = [
   {
@@ -20,58 +27,23 @@ const STRATEGIES: { key: Strategy; label: string; desc: string }[] = [
   {
     key: "fundingCarry",
     label: "Funding carry",
-    desc: "Short coins paying high positive funding — you collect funding each hour just for holding the short.",
+    desc: "Short coins paying high positive funding — collect funding each hour just for holding the short.",
+  },
+  {
+    key: "experiment",
+    label: "🧪 Relative-strength fade (experimental)",
+    desc: "An untested idea: short the alt that has run furthest AHEAD of BTC this hour, betting the excess move reverts. Paper only.",
   },
 ];
 
-/** Download the closed-trade log as a CSV file. */
-function exportCsv(closed: ClosedTrade[]) {
-  const headers = [
-    "coin",
-    "entry",
-    "exit",
-    "sizeUsd",
-    "grossPnl",
-    "fees",
-    "funding",
-    "net",
-    "reason",
-    "openedAt",
-    "closedAt",
-  ];
-  const rows = closed.map((c) =>
-    [
-      c.coin,
-      c.entryPrice,
-      c.exitPrice,
-      c.sizeUsd,
-      c.grossPnl.toFixed(4),
-      c.fees.toFixed(4),
-      c.funding.toFixed(4),
-      c.net.toFixed(4),
-      c.reason,
-      new Date(c.openedAt).toISOString(),
-      new Date(c.closedAt).toISOString(),
-    ].join(","),
-  );
-  const csv = [headers.join(","), ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `shortdesk-bot-trades.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+const STRAT_LABEL: Record<Strategy, string> = Object.fromEntries(
+  STRATEGIES.map((s) => [s.key, s.label]),
+) as Record<Strategy, string>;
 
 export function BotView() {
   const { network } = useNetwork();
   const { markets } = useMarkets(network);
-  const bot = useBot(markets, network);
-
-  const totalTrades = bot.wins + bot.losses;
-  const winRate = totalTrades > 0 ? (bot.wins / totalTrades) * 100 : 0;
-  const pnlColor = bot.realized >= 0 ? "text-long" : "text-short";
+  const [mode, setMode] = useState<"single" | "compare">("single");
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
@@ -84,27 +56,77 @@ export function BotView() {
             </span>
           </h1>
           <p className="text-sm text-muted">
-            Scans live markets for overbought coins, opens simulated shorts, and
-            closes them on a small take-profit. No real orders are placed.
+            Scans live markets for short signals and simulates trades net of
+            fees. No real orders are placed.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-border p-0.5 text-xs">
+            {(
+              [
+                ["single", "Single bot"],
+                ["compare", "Compare strategies"],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setMode(v)}
+                className={`rounded-md px-2.5 py-1 ${
+                  mode === v ? "bg-surface-2 text-foreground" : "text-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <NetworkToggle />
-          <button
-            onClick={() => bot.setRunning(!bot.running)}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
-              bot.running ? "bg-short" : "bg-long"
-            }`}
-          >
-            {bot.running ? "Stop bot" : "Start bot"}
-          </button>
         </div>
       </div>
 
       <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-        This is a learning sandbox. It simulates trades against real prices and
-        subtracts real fees — watch whether a “take tiny profits” short strategy
-        actually nets out positive here before ever considering real money.
+        Learning sandbox. It simulates trades against real prices and subtracts
+        real fees + funding — watch whether any of these actually net out
+        positive here before considering real money.
+      </div>
+
+      {mode === "single" ? (
+        <SingleBot markets={markets} />
+      ) : (
+        <CompareBots markets={markets} />
+      )}
+
+      <p className="mt-4 text-center text-[11px] text-muted">
+        Paper trading only. To test real execution, use{" "}
+        <Link href="/trade" className="text-accent hover:underline">
+          the manual terminal
+        </Link>{" "}
+        on testnet first.
+      </p>
+    </div>
+  );
+}
+
+/* ----------------------------- single bot ----------------------------- */
+
+function SingleBot({ markets }: { markets: Market[] }) {
+  const { network } = useNetwork();
+  const bot = useBot(markets, network);
+
+  const totalTrades = bot.wins + bot.losses;
+  const winRate = totalTrades > 0 ? (bot.wins / totalTrades) * 100 : 0;
+  const pnlColor = bot.realized >= 0 ? "text-long" : "text-short";
+
+  return (
+    <>
+      <div className="mb-3 flex justify-end">
+        <button
+          onClick={() => bot.setRunning(!bot.running)}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+            bot.running ? "bg-short" : "bg-long"
+          }`}
+        >
+          {bot.running ? "Stop bot" : "Start bot"}
+        </button>
       </div>
 
       {/* stats */}
@@ -121,17 +143,13 @@ export function BotView() {
           value={`${bot.unrealized >= 0 ? "+" : ""}${fmtUsd(bot.unrealized)}`}
           cls={bot.unrealized >= 0 ? "text-long" : "text-short"}
         />
-        <Stat
-          label="Fees paid"
-          value={fmtUsd(bot.totalFees)}
-          cls="text-short"
-        />
+        <Stat label="Fees paid" value={fmtUsd(bot.totalFees)} cls="text-short" />
         <Stat label="Trades" value={String(totalTrades)} />
+        <Stat label="Win rate" value={totalTrades ? fmtPct(winRate, 0) : "—"} />
         <Stat
-          label="Win rate"
-          value={totalTrades ? fmtPct(winRate, 0) : "—"}
+          label="Open"
+          value={`${bot.positions.length}/${bot.config.maxConcurrent}`}
         />
-        <Stat label="Open" value={`${bot.positions.length}/${bot.config.maxConcurrent}`} />
         <Stat
           label="Status"
           value={bot.running ? (bot.scanning ? "scanning…" : "running") : "stopped"}
@@ -155,7 +173,6 @@ export function BotView() {
         <div className="rounded-xl border border-border bg-surface p-4">
           <h3 className="mb-2 text-sm font-semibold">Strategy settings</h3>
 
-          {/* strategy picker */}
           <div className="mb-3">
             <span className="text-[11px] font-medium text-muted">Strategy</span>
             <div className="mt-1 flex flex-col gap-1">
@@ -177,11 +194,8 @@ export function BotView() {
             </div>
           </div>
 
-          {/* fee model */}
           <div className="mb-3">
-            <span className="text-[11px] font-medium text-muted">
-              Fee model
-            </span>
+            <span className="text-[11px] font-medium text-muted">Fee model</span>
             <div className="mt-1 inline-flex rounded-md border border-border p-0.5 text-xs">
               {(
                 [
@@ -204,15 +218,14 @@ export function BotView() {
               ))}
             </div>
             <p className="mt-1 text-[10px] text-muted">
-              Maker = passive limit orders (cheaper, but assume they fill).
-              Taker = market orders (instant, pricier). Round-trip breakeven on
-              a {fmtUsd(bot.config.positionSizeUsd)} trade:{" "}
+              Maker = passive limit orders (cheaper, assume they fill). Taker =
+              market orders. Round-trip breakeven on{" "}
+              {fmtUsd(bot.config.positionSizeUsd)}:{" "}
               <span className="text-warn">{fmtUsd(bot.breakevenUsd)}</span> — your
               take-profit must clear this.
             </p>
           </div>
 
-          {/* coin picker */}
           <div className="mb-3">
             <span className="text-[11px] font-medium text-muted">
               Coins to scan
@@ -233,8 +246,8 @@ export function BotView() {
               className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-50"
             />
             <p className="mt-1 text-[10px] text-muted">
-              Comma-separated symbols (e.g. BTC, ETH, SOL). Leave blank to auto-scan
-              the top {bot.config.scanCount} markets by volume.
+              Comma-separated (e.g. BTC, ETH, SOL). Blank = auto top{" "}
+              {bot.config.scanCount} by volume.
             </p>
           </div>
 
@@ -276,18 +289,22 @@ export function BotView() {
             onChange={(v) => bot.setConfig({ ...bot.config, maxConcurrent: v })}
             disabled={bot.running}
           />
-          <Field
-            label="Entry RSI (overbought)"
-            value={bot.config.entryRsi}
-            onChange={(v) => bot.setConfig({ ...bot.config, entryRsi: v })}
-            disabled={bot.running}
-          />
-          <Field
-            label="Markets to scan"
-            value={bot.config.scanCount}
-            onChange={(v) => bot.setConfig({ ...bot.config, scanCount: v })}
-            disabled={bot.running}
-          />
+          {bot.config.strategy === "meanReversion" && (
+            <Field
+              label="Entry RSI (overbought)"
+              value={bot.config.entryRsi}
+              onChange={(v) => bot.setConfig({ ...bot.config, entryRsi: v })}
+              disabled={bot.running}
+            />
+          )}
+          {bot.config.strategy === "fundingCarry" && (
+            <Field
+              label="Min funding (APR %)"
+              value={bot.config.minFundingApr}
+              onChange={(v) => bot.setConfig({ ...bot.config, minFundingApr: v })}
+              disabled={bot.running}
+            />
+          )}
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => bot.closeAll()}
@@ -297,7 +314,7 @@ export function BotView() {
             </button>
             <button
               onClick={() => {
-                if (confirm("Reset paper history (trades + P&L)?")) bot.reset();
+                if (confirm("Reset paper history?")) bot.reset();
               }}
               className="flex-1 rounded-md border border-border py-1.5 text-xs hover:border-short hover:text-short"
             >
@@ -308,7 +325,6 @@ export function BotView() {
 
         {/* live + log */}
         <div className="space-y-4">
-          {/* open positions */}
           <div className="rounded-xl border border-border bg-surface p-4">
             <h3 className="mb-2 text-sm font-semibold">
               Open positions ({bot.positions.length})
@@ -316,7 +332,7 @@ export function BotView() {
             {bot.positions.length === 0 ? (
               <p className="py-3 text-center text-xs text-muted">
                 {bot.running
-                  ? "Waiting for an overbought short signal…"
+                  ? "Waiting for a signal…"
                   : "Start the bot to begin scanning."}
               </p>
             ) : (
@@ -339,7 +355,6 @@ export function BotView() {
             )}
           </div>
 
-          {/* closed trades */}
           <div className="rounded-xl border border-border bg-surface p-4">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold">
@@ -397,7 +412,6 @@ export function BotView() {
             )}
           </div>
 
-          {/* activity log */}
           <div className="rounded-xl border border-border bg-surface p-4">
             <h3 className="mb-2 text-sm font-semibold">Activity</h3>
             <div className="max-h-40 space-y-0.5 overflow-y-auto font-mono text-[11px] text-muted">
@@ -417,16 +431,175 @@ export function BotView() {
           </div>
         </div>
       </div>
+    </>
+  );
+}
 
-      <p className="mt-4 text-center text-[11px] text-muted">
-        Paper trading only. When you’re ready to test real execution, do it on{" "}
-        <Link href="/trade" className="text-accent hover:underline">
-          the manual terminal
-        </Link>{" "}
-        on testnet first.
-      </p>
+/* --------------------------- comparison mode --------------------------- */
+
+function CompareBots({ markets }: { markets: Market[] }) {
+  const { network } = useNetwork();
+  // Four independent paper accounts, one per strategy, each with its own store.
+  const bots = {
+    meanReversion: useBot(markets, network, {
+      storageKey: "shortdesk.bot.cmp.meanReversion",
+      lockedStrategy: "meanReversion",
+    }),
+    momentum: useBot(markets, network, {
+      storageKey: "shortdesk.bot.cmp.momentum",
+      lockedStrategy: "momentum",
+    }),
+    fundingCarry: useBot(markets, network, {
+      storageKey: "shortdesk.bot.cmp.fundingCarry",
+      lockedStrategy: "fundingCarry",
+    }),
+    experiment: useBot(markets, network, {
+      storageKey: "shortdesk.bot.cmp.experiment",
+      lockedStrategy: "experiment",
+    }),
+  };
+  const list = Object.values(bots);
+  const anyRunning = list.some((b) => b.running);
+  const bestRealized = Math.max(...list.map((b) => b.realized));
+
+  function setAll(run: boolean) {
+    list.forEach((b) => b.setRunning(run));
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs text-muted">
+          Four strategies, four separate paper accounts, same live data — running
+          head-to-head. Same default settings (maker fees, {fmtUsd(100)}/trade).
+        </p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setAll(!anyRunning)}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+              anyRunning ? "bg-short" : "bg-long"
+            }`}
+          >
+            {anyRunning ? "Stop all" : "Start all"}
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Reset all comparison accounts?"))
+                list.forEach((b) => b.reset());
+            }}
+            className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-foreground"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(Object.keys(bots) as Strategy[]).map((key) => (
+          <CompareCard
+            key={key}
+            strat={key}
+            bot={bots[key as keyof typeof bots]}
+            leading={
+              bots[key as keyof typeof bots].realized === bestRealized &&
+              bestRealized !== 0
+            }
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function CompareCard({
+  strat,
+  bot,
+  leading,
+}: {
+  strat: Strategy;
+  bot: ReturnType<typeof useBot>;
+  leading: boolean;
+}) {
+  const trades = bot.wins + bot.losses;
+  const winRate = trades ? (bot.wins / trades) * 100 : 0;
+  return (
+    <div
+      className={`rounded-xl border bg-surface p-4 ${
+        leading ? "border-long/60" : "border-border"
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">{STRAT_LABEL[strat]}</h3>
+        {leading && (
+          <span className="rounded bg-long/20 px-1.5 py-0.5 text-[10px] font-medium text-long">
+            leading
+          </span>
+        )}
+      </div>
+      <div className="mt-2 flex items-end justify-between">
+        <div>
+          <div className="text-[11px] text-muted">Realized P&L</div>
+          <div
+            className={`tabular text-xl font-semibold ${
+              bot.realized >= 0 ? "text-long" : "text-short"
+            }`}
+          >
+            {bot.realized >= 0 ? "+" : ""}
+            {fmtUsd(bot.realized)}
+          </div>
+        </div>
+        <div className="text-right text-[11px] text-muted">
+          <div>{trades} trades · {trades ? fmtPct(winRate, 0) : "—"} win</div>
+          <div>fees {fmtUsd(bot.totalFees)}</div>
+          <div>{bot.positions.length} open</div>
+        </div>
+      </div>
+      <div className="mt-2">
+        <EquityChart points={bot.equityCurve} start={bot.config.startBalance} />
+      </div>
     </div>
   );
+}
+
+/* ------------------------------ helpers ------------------------------ */
+
+function exportCsv(closed: ClosedTrade[]) {
+  const headers = [
+    "coin",
+    "entry",
+    "exit",
+    "sizeUsd",
+    "grossPnl",
+    "fees",
+    "funding",
+    "net",
+    "reason",
+    "openedAt",
+    "closedAt",
+  ];
+  const rows = closed.map((c) =>
+    [
+      c.coin,
+      c.entryPrice,
+      c.exitPrice,
+      c.sizeUsd,
+      c.grossPnl.toFixed(4),
+      c.fees.toFixed(4),
+      c.funding.toFixed(4),
+      c.net.toFixed(4),
+      c.reason,
+      new Date(c.openedAt).toISOString(),
+      new Date(c.closedAt).toISOString(),
+    ].join(","),
+  );
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "shortdesk-bot-trades.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function EquityChart({
@@ -452,14 +625,15 @@ function EquityChart({
   const span = max - min || 1;
   const x = (i: number) => pad + (i / (points.length - 1)) * (w - 2 * pad);
   const y = (e: number) => pad + (1 - (e - min) / span) * (h - 2 * pad);
-  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.e).toFixed(1)}`).join(" ");
+  const path = points
+    .map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(p.e).toFixed(1)}`)
+    .join(" ");
   const last = points[points.length - 1].e;
   const up = last >= start;
   const startY = y(start);
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none">
-      {/* start-balance baseline */}
       <line
         x1={pad}
         x2={w - pad}
@@ -492,7 +666,9 @@ function Stat({
   return (
     <div className="rounded-lg border border-border bg-surface px-3 py-2">
       <div className="text-[11px] text-muted">{label}</div>
-      <div className={`tabular font-semibold ${big ? "text-lg" : "text-sm"} ${cls ?? ""}`}>
+      <div
+        className={`tabular font-semibold ${big ? "text-lg" : "text-sm"} ${cls ?? ""}`}
+      >
         {value}
       </div>
     </div>
