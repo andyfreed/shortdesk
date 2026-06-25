@@ -37,6 +37,12 @@ export function ShortRadar({ minVolumeUsd = 1_000_000 }: { minVolumeUsd?: number
         <span className="text-xs text-muted">
           {loading ? "loading…" : "via live funding rates"}
         </span>
+        <Link
+          href="/radar"
+          className="ml-auto text-xs text-accent hover:underline"
+        >
+          Full radar →
+        </Link>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <RadarCard
@@ -90,17 +96,25 @@ function RadarCard({
         )}
         {rows.map((m) => {
           const apr = annualizedFundingPct(m.funding);
+          const up = (m.change24hPct ?? 0) >= 0;
           return (
             <Link
               key={m.name}
               href={`/trade?coin=${m.name}`}
               className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-surface-2"
             >
-              <span className="font-medium">{m.name}</span>
-              <span className="flex items-center gap-3 text-xs">
-                <span className="text-muted">${fmtCompact(m.dayVolumeUsd)}</span>
+              <span className="flex items-baseline gap-2">
+                <span className="font-medium">{m.name}</span>
+                <span className="text-[10px] text-muted">
+                  OI ${fmtCompact(m.openInterest)}
+                </span>
+              </span>
+              <span className="flex items-center gap-3 text-xs tabular">
+                <span className={`w-14 text-right ${up ? "text-long" : "text-short"}`}>
+                  {fmtPct(m.change24hPct)}
+                </span>
                 <span
-                  className={`tabular w-20 text-right ${
+                  className={`w-20 text-right ${
                     apr >= 0 ? "text-long" : "text-short"
                   }`}
                 >
