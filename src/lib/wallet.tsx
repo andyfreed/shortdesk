@@ -52,13 +52,20 @@ interface WalletState {
 
 interface WalletCtx extends WalletState {
   connectBrowser: () => Promise<void>;
-  connectAgent: (privateKey: string, masterAddress: string) => void;
+  connectAgent: (
+    privateKey: string,
+    masterAddress: string,
+    remember?: boolean,
+  ) => void;
   disconnect: () => void;
 }
 
 const Ctx = createContext<WalletCtx | null>(null);
 
-const ADDR_KEY = "shortdesk.master"; // address only — never the key
+const ADDR_KEY = "shortdesk.master"; // master address (not sensitive)
+// Opt-in only. Holds the AGENT key, which cannot withdraw funds — so the worst
+// case if this device is compromised is unauthorized trades, not theft.
+const KEY_KEY = "shortdesk.agentKey";
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WalletState>({
@@ -69,12 +76,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     error: null,
   });
 
-  // Restore only the (non-sensitive) master address for display convenience.
+  // On load: restore the master address, and — only if the user opted in —
+  // rebuild the agent signer from the saved key so reloads stay connected.
   useEffect(() => {
-    const saved = localStorage.getItem(ADDR_KEY);
-    if (saved && isAddress(saved)) {
-      setState((s) => ({ ...s, address: getAddress(saved) }));
+    const savedAddr = localStorage.getItem(ADDR_KEY);
+    const savedKey = localStorage.getItem(KEY_KEY);
+    if (!savedAddr || !isAddress(savedAddr)) return;
+    const address = getAddress(savedAddr);
+
+    if (savedKey && /^0x[0-9a-fA-F]{64}$/.test(savedKey)) {
+      try {
+        const account = privateKeyToAccount(savedKey as `0x${string}`);
+        setState((s) => ({ ...s, mode: "agent", signer: account, address }));
+        return;
+      } catch {
+        localStorage.removeItem(KEY_KEY);
+      }
     }
+    setState((s) => ({ ...s, address }));
   }, []);
 
   const connectBrowser = useCallback(async () => {
@@ -113,7 +132,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const connectAgent = useCallback(
-    (privateKey: string, masterAddress: string) => {
+    (privateKey: string, masterAddress: string, remember = false) => {
       try {
         const key = privateKey.trim();
         const normalized = (key.startsWith("0x") ? key : `0x${key}`) as `0x${string}`;
@@ -122,11 +141,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         if (!isAddress(masterAddress.trim()))
           throw new Error("Enter the main account address you deposited to.");
         const account = privateKeyToAccount(normalized);
-        localStorage.setItem(ADDR_KEY, getAddress(masterAddress.trim()));
+        const address = getAddress(masterAddress.trim());
+        localStorage.setItem(ADDR_KEY, address);
+        if (remember) localStorage.setItem(KEY_KEY, normalized);
+        else localStorage.removeItem(KEY_KEY);
         setState({
           mode: "agent",
           signer: account,
-          address: getAddress(masterAddress.trim()),
+          address,
           connecting: false,
           error: null,
         });
@@ -142,6 +164,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => {
     localStorage.removeItem(ADDR_KEY);
+    localStorage.removeItem(KEY_KEY);
     setState({
       mode: null,
       signer: null,

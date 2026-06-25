@@ -12,7 +12,13 @@ export function WalletPanel() {
   const [tab, setTab] = useState<"agent" | "browser">("agent");
   const [key, setKey] = useState("");
   const [master, setMaster] = useState("");
+  const [remember, setRemember] = useState(true);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+
+  // Pre-fill the address field with whatever was saved last time.
+  useEffect(() => {
+    if (w.address) setMaster((m) => m || w.address!);
+  }, [w.address]);
 
   // Pull live account state when connected (or when an address is remembered).
   useEffect(() => {
@@ -119,7 +125,7 @@ export function WalletPanel() {
           <p className="rounded-md bg-surface-2 p-2 text-xs text-muted">
             Recommended. In Hyperliquid: <strong>More → API</strong> → generate
             a wallet. Agent keys can trade but <strong>cannot withdraw</strong>.
-            Held in memory only, forgotten on reload.
+            Sent only to Hyperliquid, never to our servers.
           </p>
           <input
             value={master}
@@ -134,8 +140,21 @@ export function WalletPanel() {
             placeholder="Agent private key (0x…)"
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
           />
+          <label className="flex cursor-pointer items-start gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              Stay connected on this device (saves the agent key in this
+              browser). Only do this on a device you trust — the key can trade
+              but cannot withdraw your funds.
+            </span>
+          </label>
           <button
-            onClick={() => w.connectAgent(key, master)}
+            onClick={() => w.connectAgent(key, master, remember)}
             className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             Connect agent
