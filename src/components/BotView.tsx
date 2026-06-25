@@ -13,6 +13,7 @@ import { fmtUsd, fmtPct } from "@/lib/format";
 import { EquityChart } from "@/components/EquityChart";
 import { FarmView } from "@/components/FarmView";
 import { AllSims } from "@/components/AllSims";
+import { RunnerControl } from "@/components/RunnerControl";
 import { Tip } from "@/components/Info";
 
 const STRATEGIES: { key: Strategy; label: string; desc: string }[] = [
@@ -45,7 +46,7 @@ const STRAT_LABEL: Record<Strategy, string> = Object.fromEntries(
 export function BotView() {
   const { markets } = useMarkets(BOT_NETWORK);
   const [mode, setMode] = useState<
-    "single" | "compare" | "farm" | "all"
+    "single" | "compare" | "farm" | "all" | "runner"
   >("single");
 
   return (
@@ -71,6 +72,7 @@ export function BotView() {
                 ["compare", "Compare"],
                 ["farm", "Funding farm"],
                 ["all", "All (race)"],
+                ["runner", "24/7"],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -105,8 +107,10 @@ export function BotView() {
         <CompareBots markets={markets} network={BOT_NETWORK} />
       ) : mode === "farm" ? (
         <FarmView markets={markets} network={BOT_NETWORK} />
-      ) : (
+      ) : mode === "all" ? (
         <AllSims markets={markets} network={BOT_NETWORK} />
+      ) : (
+        <RunnerControl />
       )}
 
       <p className="mt-4 text-center text-[11px] text-muted">

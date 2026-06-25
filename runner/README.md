@@ -53,6 +53,32 @@ Any host that runs a long-lived Node process works. The simplest:
 > For durable state, point `STATE_PATH` at a mounted volume, or accept that a
 > redeploy starts the paper account fresh.
 
+## Control it from the web app (start/stop/status)
+
+Instead of the bare CLI, run the **control server**, which exposes a tiny
+token-protected HTTP API the app's **Bot → 24/7** tab talks to:
+
+```bash
+CONTROL_TOKEN=pick-a-long-secret node runner/server.mjs
+```
+
+Endpoints (all require `Authorization: Bearer <CONTROL_TOKEN>`):
+`GET /status`, `POST /start`, `POST /stop`. CORS is open by default
+(`ALLOW_ORIGIN=*`); set `ALLOW_ORIGIN` to your Vercel URL to lock it down.
+
+**Deploy (Railway/Render/Fly):**
+1. Start command: `node runner/server.mjs`
+2. Env: `CONTROL_TOKEN=<secret>` (required), optionally `AUTOSTART=1`,
+   `ALLOW_ORIGIN=https://your-app.vercel.app`, plus any farm config below.
+3. Note the public URL it gets.
+
+**In the app:** open **Bot → 24/7**, paste the runner URL + the same
+`CONTROL_TOKEN`, hit **Save & connect**, then **Start** / **Stop**. Live status
+(equity, open positions, funding collected) polls automatically.
+
+Extra env for the server: `PORT` (default 8080), `CONTROL_TOKEN` (required),
+`ALLOW_ORIGIN` (default `*`), `AUTOSTART` (`1` to run on boot).
+
 ## Configuration (env vars, all optional)
 
 | Var | Default | Meaning |
