@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtUsd, fmtPct } from "@/lib/format";
+import { EquityChart } from "@/components/EquityChart";
+import type { EquityPoint } from "@/lib/bot";
 
 interface RunnerStatus {
   running: boolean;
@@ -23,6 +25,7 @@ interface RunnerStatus {
     fees: number;
     reason: string;
   }[];
+  equityCurve?: EquityPoint[];
   config: { startBalance: number };
 }
 
@@ -204,6 +207,20 @@ export function RunnerControl() {
               big
             />
             <Stat label="Open" value={String(status.openCount)} />
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Equity curve</h3>
+              <span className="text-[11px] text-muted">
+                dashed = starting {fmtUsd(status.config.startBalance)} · funding
+                minus fees
+              </span>
+            </div>
+            <EquityChart
+              points={status.equityCurve ?? []}
+              start={status.config.startBalance}
+            />
           </div>
 
           <div className="rounded-xl border border-border bg-surface p-4">

@@ -44,7 +44,7 @@ export function createFarm(config, onLog = () => {}) {
         /* fresh */
       }
     }
-    return { realized: 0, positions: [], closed: [] };
+    return { realized: 0, positions: [], closed: [], equityCurve: [] };
   }
 
   function save() {
@@ -138,6 +138,12 @@ export function createFarm(config, onLog = () => {}) {
       }
     }
 
+    // record an equity-curve point (kept so the app can chart real history)
+    if (!state.equityCurve) state.equityCurve = [];
+    state.equityCurve.push({ t: now, e: equity() });
+    if (state.equityCurve.length > 1000)
+      state.equityCurve = state.equityCurve.slice(-1000);
+
     save();
   }
 
@@ -177,6 +183,7 @@ export function createFarm(config, onLog = () => {}) {
           ageHours: (Date.now() - p.openedAt) / 3_600_000,
         })),
         recentClosed: state.closed.slice(0, 20),
+        equityCurve: (state.equityCurve || []).slice(-300),
         config: {
           perPositionUsd: config.perPositionUsd,
           maxPositions: config.maxPositions,

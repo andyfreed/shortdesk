@@ -95,10 +95,39 @@ export function BotView() {
         </div>
       </div>
 
-      <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+      <div className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
         Learning sandbox. It simulates trades against real prices and subtracts
         real fees + funding — watch whether any of these actually net out
         positive here before considering real money.
+      </div>
+
+      <div
+        className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
+          mode === "runner"
+            ? "border-long/40 bg-long/10 text-foreground"
+            : "border-border bg-surface text-muted"
+        }`}
+      >
+        {mode === "runner" ? (
+          <>
+            <strong className="text-long">Runs 24/7 on your server.</strong>{" "}
+            This is the only mode that keeps going with your browser closed (it
+            lives on the host you connected, not this page).
+          </>
+        ) : (
+          <>
+            <strong>Runs in this browser tab only.</strong> This sim runs while
+            you’re on this tab; it pauses if you leave and resumes when you come
+            back. For always-on (browser closed), use the{" "}
+            <button
+              onClick={() => setMode("runner")}
+              className="text-accent underline"
+            >
+              24/7
+            </button>{" "}
+            tab.
+          </>
+        )}
       </div>
 
       {mode === "single" ? (
