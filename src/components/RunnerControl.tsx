@@ -51,7 +51,10 @@ export function RunnerControl() {
 
   const call = useCallback(
     async (path: string, method: "GET" | "POST") => {
-      const h = hostRef.current.replace(/\/$/, "");
+      let h = hostRef.current.trim().replace(/\/$/, "");
+      // Auto-add https:// — without a scheme the browser treats it as a
+      // relative path and hits this app (404) instead of the runner.
+      if (h && !/^https?:\/\//i.test(h)) h = `https://${h}`;
       if (!h || !tokenRef.current) throw new Error("Set the host URL and token first.");
       const res = await fetch(`${h}${path}`, {
         method,
