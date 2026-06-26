@@ -169,11 +169,19 @@ export function createFarm(config, onLog = () => {}) {
       timer = null;
     },
     status() {
+      const totalFunding =
+        state.closed.reduce((s, c) => s + c.fundingCollected, 0) +
+        state.positions.reduce((s, p) => s + p.accruedFunding, 0);
+      const totalFees =
+        state.closed.reduce((s, c) => s + c.fees, 0) +
+        state.positions.reduce((s, p) => s + p.openFees, 0);
       return {
         running,
         equity: equity(),
         realized: state.realized,
         unrealized: unrealized(),
+        totalFunding,
+        totalFees,
         openCount: state.positions.length,
         positions: state.positions.map((p) => ({
           coin: p.coin,

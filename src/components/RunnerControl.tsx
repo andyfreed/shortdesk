@@ -10,6 +10,8 @@ interface RunnerStatus {
   equity: number;
   realized: number;
   unrealized: number;
+  totalFunding: number;
+  totalFees: number;
   openCount: number;
   positions: {
     coin: string;
@@ -187,7 +189,7 @@ export function RunnerControl() {
       {/* live status */}
       {status && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Stat
               label="Status"
               value={status.running ? "running" : "stopped"}
@@ -206,8 +208,23 @@ export function RunnerControl() {
               }
               big
             />
-            <Stat label="Open" value={String(status.openCount)} />
+            <Stat
+              label="Funding collected"
+              value={`+${fmtUsd(status.totalFunding ?? 0)}`}
+              cls="text-long"
+            />
+            <Stat
+              label="Fees paid"
+              value={`−${fmtUsd(status.totalFees ?? 0)}`}
+              cls="text-short"
+            />
+            <Stat label="Open positions" value={String(status.openCount)} />
           </div>
+          <p className="-mt-1 text-center text-[11px] text-muted">
+            The tug-of-war: <span className="text-long">funding collected</span>{" "}
+            needs to grow past <span className="text-short">fees paid</span> for
+            this to be profitable.
+          </p>
 
           <div className="rounded-xl border border-border bg-surface p-4">
             <div className="mb-1 flex items-center justify-between">
