@@ -41,10 +41,23 @@ export function RunnerControl() {
     typeof window !== "undefined" ? localStorage.getItem(k) ?? "" : "";
   const [host, setHost] = useState(() => ls("shortdesk.runner.host"));
   const [token, setToken] = useState(() => ls("shortdesk.runner.token"));
-  const [saved, setSaved] = useState(
-    () => !!ls("shortdesk.runner.host") && !!ls("shortdesk.runner.token"),
+  // Editing the connection only when it isn't configured yet; once set it's
+  // remembered and collapsed so you never re-enter it.
+  const [editing, setEditing] = useState(
+    () => !(ls("shortdesk.runner.host") && ls("shortdesk.runner.token")),
   );
+  const ready = host.trim().length > 0 && token.trim().length > 0;
   const [status, setStatus] = useState<RunnerStatus | null>(null);
+
+  // Persist on every keystroke so settings are never lost.
+  function updateHost(v: string) {
+    setHost(v);
+    localStorage.setItem("shortdesk.runner.host", v.trim());
+  }
+  function updateToken(v: string) {
+    setToken(v);
+    localStorage.setItem("shortdesk.runner.token", v.trim());
+  }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hostRef = useRef(host);
@@ -88,20 +101,14 @@ export function RunnerControl() {
 
   // poll while configured (initial call deferred so it's not a sync effect setState)
   useEffect(() => {
-    if (!saved) return;
+    if (!ready) return;
     const t = setTimeout(refresh, 0);
     const id = setInterval(refresh, 8000);
     return () => {
       clearTimeout(t);
       clearInterval(id);
     };
-  }, [saved, refresh]);
-
-  function save() {
-    localStorage.setItem("shortdesk.runner.host", host.trim());
-    localStorage.setItem("shortdesk.runner.token", token.trim());
-    setSaved(!!host.trim() && !!token.trim());
-  }
+  }, [ready, refresh]);
 
   async function control(path: "/start" | "/stop") {
     setBusy(true);
@@ -127,58 +134,82 @@ export function RunnerControl() {
 
       {/* connection settings */}
       <div className="rounded-xl border border-border bg-surface p-4">
-        <h3 className="mb-2 text-sm font-semibold">Runner connection</h3>
-        <label className="mb-2 block">
-          <span className="text-[11px] text-muted">Runner URL</span>
-          <input
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="https://your-farm.up.railway.app"
-            className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
-          />
-        </label>
-        <label className="mb-2 block">
-          <span className="text-[11px] text-muted">Control token</span>
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            type="password"
-            placeholder="the CONTROL_TOKEN you set on the runner"
-            className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
-          />
-        </label>
-        <div className="flex gap-2">
-          <button
-            onClick={save}
-            className="rounded-md border border-border px-3 py-1.5 text-xs hover:border-accent hover:text-accent"
-          >
-            Save & connect
-          </button>
-          {saved && (
-            <>
-              <button
-                onClick={() => control("/start")}
-                disabled={busy}
-                className="rounded-md bg-long px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                Start
-              </button>
-              <button
-                onClick={() => control("/stop")}
-                disabled={busy}
-                className="rounded-md bg-short px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                Stop
-              </button>
-              <button
-                onClick={refresh}
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground"
-              >
-                Refresh
-              </button>
-            </>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">Runner connection</h3>
+          {ready && !editing && (
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs text-muted hover:text-foreground"
+            >
+              Edit
+            </button>
           )}
         </div>
+
+        {editing || !ready ? (
+          <>
+            <label className="mb-2 block">
+              <span className="text-[11px] text-muted">Runner URL</span>
+              <input
+                value={host}
+                onChange={(e) => updateHost(e.target.value)}
+                placeholder="https://your-farm.up.railway.app"
+                className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
+              />
+            </label>
+            <label className="mb-2 block">
+              <span className="text-[11px] text-muted">Control token</span>
+              <input
+                value={token}
+                onChange={(e) => updateToken(e.target.value)}
+                type="password"
+                placeholder="the CONTROL_TOKEN you set on the runner"
+                className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
+              />
+            </label>
+            {ready && (
+              <button
+                onClick={() => {
+                  setEditing(false);
+                  refresh();
+                }}
+                className="mb-1 rounded-md border border-border px-3 py-1.5 text-xs hover:border-accent hover:text-accent"
+              >
+                Done
+              </button>
+            )}
+          </>
+        ) : (
+          <div className="mb-2 truncate text-xs text-muted">
+            Connected to <span className="text-foreground">{host}</span> · saved
+            on this device
+          </div>
+        )}
+
+        {ready && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => control("/start")}
+              disabled={busy}
+              className="rounded-md bg-long px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              Start
+            </button>
+            <button
+              onClick={() => control("/stop")}
+              disabled={busy}
+              className="rounded-md bg-short px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              Stop
+            </button>
+            <button
+              onClick={refresh}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground"
+            >
+              Refresh
+            </button>
+          </div>
+        )}
         {error && (
           <div className="mt-2 rounded-md border border-short/40 bg-short/10 px-2.5 py-1.5 text-xs text-short">
             {error}

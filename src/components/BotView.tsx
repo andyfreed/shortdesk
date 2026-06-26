@@ -64,8 +64,8 @@ export function BotView() {
             fees. No real orders are placed.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-border p-0.5 text-xs">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="no-scrollbar flex max-w-full overflow-x-auto rounded-lg border border-border p-0.5 text-xs">
             {(
               [
                 ["single", "Single bot"],
@@ -78,7 +78,7 @@ export function BotView() {
               <button
                 key={v}
                 onClick={() => setMode(v)}
-                className={`rounded-md px-2.5 py-1 ${
+                className={`shrink-0 rounded-md px-2.5 py-1 ${
                   mode === v ? "bg-surface-2 text-foreground" : "text-muted"
                 }`}
               >
@@ -543,7 +543,7 @@ function CompareBots({
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted">
           Four strategies, four separate paper accounts, same live data — running
           head-to-head. Same default settings (maker fees, {fmtUsd(100)}/trade).

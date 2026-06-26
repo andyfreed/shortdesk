@@ -18,7 +18,7 @@ export function FarmView({
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted">
           Delta-neutral: short a high-funding perp <strong>and</strong> hold an
           equal long, so price moves cancel and you just collect funding. The

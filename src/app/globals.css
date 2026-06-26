@@ -36,6 +36,16 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  /* never let a stray wide element scroll the whole page sideways on mobile */
+  overflow-x: hidden;
+}
+
+/* horizontal scrollers (tab strips, tables) without a visible scrollbar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 * {

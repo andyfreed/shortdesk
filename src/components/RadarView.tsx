@@ -55,7 +55,7 @@ export function RadarView() {
         <NetworkToggle />
       </div>
 
-      <div className="mb-3 flex items-center gap-2 text-xs text-muted">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
         <span>Min 24h volume:</span>
         {[0, 1_000_000, 10_000_000, 50_000_000].map((v) => (
           <button
