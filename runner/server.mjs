@@ -18,7 +18,9 @@ import { createFarm, configFromEnv } from "./farm-core.mjs";
 
 const PORT = Number(process.env.PORT) || 8080;
 const TOKEN = process.env.CONTROL_TOKEN;
-const ORIGIN = process.env.ALLOW_ORIGIN || "*";
+// Strip any trailing slash — a browser Origin never has one, so "https://x/"
+// would never match and would block every request.
+const ORIGIN = (process.env.ALLOW_ORIGIN || "*").replace(/\/$/, "");
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
 
