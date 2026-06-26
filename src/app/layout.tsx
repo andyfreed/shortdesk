@@ -4,6 +4,7 @@ import "./globals.css";
 import { Nav } from "@/components/Nav";
 import { NetworkProvider } from "@/lib/network";
 import { WalletProvider } from "@/lib/wallet";
+import { SectionProvider } from "@/lib/section";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,17 +33,19 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <NetworkProvider>
-          <WalletProvider>
-            <Nav />
-            <main className="flex-1">{children}</main>
-            <footer className="border-t border-border px-4 py-6 text-center text-xs text-muted">
-              ShortDesk is an educational tool. It is not financial advice.
-              Leveraged shorting can lose more than your initial margin. You are
-              solely responsible for any trades you place.
-            </footer>
-          </WalletProvider>
-        </NetworkProvider>
+        <SectionProvider>
+          <NetworkProvider>
+            <WalletProvider>
+              <Nav />
+              <main className="flex-1">{children}</main>
+              <footer className="border-t border-border px-4 py-6 text-center text-xs text-muted">
+                ShortDesk is an educational tool. It is not financial advice.
+                Leveraged shorting can lose more than your initial margin. You
+                are solely responsible for any trades you place.
+              </footer>
+            </WalletProvider>
+          </NetworkProvider>
+        </SectionProvider>
       </body>
     </html>
   );
